@@ -1,97 +1,234 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: SupaSync Documentation
+description: Sync your Obsidian vault to Supabase with one-way, incremental updates
+mode: custom
 ---
 
-## Setting up
+<div className="relative bg-gradient-to-br from-[#0d0d0d] via-[#1a1a1a] to-[#0d0d0d] dark:from-[#0d0d0d] dark:via-[#1a1a1a] dark:to-[#0d0d0d] overflow-hidden">
+  <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImdyaWQiIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTSAxMCAwIEwgMCAwIDAgMTAiIGZpbGw9Im5vbmUiIHN0cm9rZT0icmdiYSgyNTUsMjU1LDI1NSwwLjAzKSIgc3Ryb2tlLXdpZHRoPSIxIi8+PC9wYXR0ZXJuPjwvZGVmcz48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSJ1cmwoI2dyaWQpIi8+PC9zdmc+')] opacity-40"></div>
+  
+  <div className="relative max-w-7xl mx-auto px-6 sm:px-8 py-16 sm:py-20 lg:py-24">
+    <div className="lg:grid lg:grid-cols-12 lg:gap-12 items-center">
+      <div className="lg:col-span-7">
+        <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-white leading-tight">
+          Sync Obsidian to Supabase
+        </h1>
+        <p className="mt-6 text-lg sm:text-xl text-gray-300 max-w-2xl leading-relaxed">
+          One-way sync from your Obsidian vault to Supabase. Hash-based incremental updates, delete detection, and authentication built in.
+        </p>
+        
+        <div className="mt-8 flex flex-wrap gap-4">
+          <a 
+            href="/quickstart" 
+            className="inline-flex items-center px-6 py-3 rounded-lg bg-[#39be82] hover:bg-[#327c5c] text-white font-semibold transition-colors shadow-lg shadow-[#39be82]/20"
+          >
+            Get Started
+            <svg className="ml-2 w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+            </svg>
+          </a>
+          <a 
+            href="/introduction" 
+            className="inline-flex items-center px-6 py-3 rounded-lg border border-white/30 bg-white/10 hover:bg-white/20 text-white font-semibold transition-colors backdrop-blur-sm"
+          >
+            Learn More
+          </a>
+        </div>
+      </div>
+      
+      <div className="hidden lg:block lg:col-span-5 mt-12 lg:mt-0">
+        <div className="relative">
+          <div className="absolute -inset-4 bg-gradient-to-r from-[#39be82] to-[#327c5c] rounded-2xl opacity-20 blur-2xl"></div>
+          <div className="relative bg-[#121212] dark:bg-[#121212] border border-[#2c2c2c] dark:border-[#2c2c2c] rounded-2xl p-6 shadow-2xl">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="w-3 h-3 rounded-full bg-red-500"></div>
+              <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
+              <div className="w-3 h-3 rounded-full bg-green-500"></div>
+            </div>
+            <pre className="text-sm text-gray-300 overflow-x-auto">
+              <code>{`// Install in your vault
+cd .obsidian/plugins
+git clone supasync
 
-Get your documentation site up and running in minutes.
+// Configure in Obsidian
+Settings → SupaSync
+  - Add Supabase URL
+  - Add anon key
+  - Sign in
+  - Start syncing`}</code>
+            </pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="text-center mb-12">
+    <h2 className="text-3xl font-bold text-gray-900 dark:text-white">Quick start</h2>
+    <p className="mt-3 text-base text-gray-600 dark:text-gray-400">Get SupaSync running in your vault in minutes</p>
+  </div>
 
-## Make it yours
+  <Steps>
+    <Step title="Install the plugin">
+      Build the plugin and copy it to your vault's plugins folder:
+      
+      ```bash
+      npm run build
+      cp main.js manifest.json ~/.obsidian/plugins/supasync/
+      ```
+      
+      Enable **SupaSync** in Obsidian Settings → Community plugins.
+    </Step>
 
-Design a docs site that looks great and empowers your users.
+    <Step title="Set up Supabase">
+      Create a Supabase project and run the database migration to create the `notes` table with Row Level Security:
+      
+      ```sql
+      create table notes (
+        id uuid primary key default gen_random_uuid(),
+        user_id uuid not null,
+        path text not null,
+        title text,
+        content text not null,
+        hash text not null,
+        updated_at timestamptz default now(),
+        unique (user_id, path)
+      );
+      
+      alter table notes enable row level security;
+      ```
+      
+      See the [Supabase setup guide](/setup/supabase) for complete RLS policies and authentication configuration.
+    </Step>
 
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
-  </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
-  </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
-  </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
-  </Card>
-</Columns>
+    <Step title="Configure and authenticate">
+      Open **Settings → SupaSync** and enter your:
+      - Supabase Project URL
+      - Anon key
+      
+      Then **sign in** using email/password or Google OAuth. Authentication is required for sync.
+    </Step>
 
-## Create beautiful pages
+    <Step title="Start syncing">
+      Trigger a sync via:
+      - Command palette → **Full Sync**
+      - Sync panel (ribbon icon) → **Sync** button
+      - Enable **Auto-sync** in settings for automatic syncing on file changes
+      
+      <Note>
+        The status bar shows sync progress and displays the last sync time. Configure sync folders in settings to limit which folders are synced (empty = entire vault).
+      </Note>
+    </Step>
+  </Steps>
+</div>
 
-Everything you need to create world-class documentation.
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="text-center mb-12">
+    <h2 className="text-3xl font-bold text-gray-900 dark:text-white">Features</h2>
+    <p className="mt-3 text-base text-gray-600 dark:text-gray-400">Everything you need for reliable vault syncing</p>
+  </div>
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+  <CardGroup cols={2}>
+    <Card title="Incremental sync" icon="bolt" href="/architecture/sync-behavior">
+      Hash-based change detection. Only modified or new files are uploaded, keeping sync fast.
+    </Card>
+    <Card title="Delete detection" icon="trash" href="/architecture/sync-behavior">
+      Automatically removes notes from Supabase when files are deleted or renamed in your vault.
+    </Card>
+    <Card title="Authentication" icon="lock" href="/setup/authentication">
+      Email/password and Google OAuth support with session persistence and Row Level Security.
+    </Card>
+    <Card title="Folder scoping" icon="folder" href="/setup/configuration">
+      Sync your entire vault or specific folders. Configure exactly what gets synced.
+    </Card>
+    <Card title="Auto-sync" icon="rotate" href="/usage/auto-sync">
+      Optional automatic syncing on file create, modify, delete, and rename with debounce.
+    </Card>
+    <Card title="Sync panel UI" icon="table-list" href="/usage/sync-panel">
+      Visual file list with status icons, sync button, and progress tracking in a dedicated panel.
+    </Card>
+  </CardGroup>
+</div>
 
-## Need inspiration?
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="text-center mb-12">
+    <h2 className="text-3xl font-bold text-gray-900 dark:text-white">Explore the docs</h2>
+    <p className="mt-3 text-base text-gray-600 dark:text-gray-400">Learn more about setup, usage, and architecture</p>
+  </div>
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <a href="/setup/supabase" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#39be82] dark:hover:border-[#39be82] overflow-hidden no-underline transition-all bg-white dark:bg-[#1a1d27]">
+      <div className="p-6">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2">Supabase Setup</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">Database migration, RLS policies, and authentication providers</p>
+        <div className="flex items-center text-sm text-[#39be82] group-hover:text-[#327c5c] transition-colors">
+          View guide
+          <svg className="ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+
+    <a href="/usage/syncing" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#39be82] dark:hover:border-[#39be82] overflow-hidden no-underline transition-all bg-white dark:bg-[#1a1d27]">
+      <div className="p-6">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2">Syncing Guide</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">Full sync, incremental sync, and scope rules explained</p>
+        <div className="flex items-center text-sm text-[#39be82] group-hover:text-[#327c5c] transition-colors">
+          View guide
+          <svg className="ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+
+    <a href="/architecture/overview" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#39be82] dark:hover:border-[#39be82] overflow-hidden no-underline transition-all bg-white dark:bg-[#1a1d27]">
+      <div className="p-6">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2">Architecture</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">Project structure, sync behavior, and security model</p>
+        <div className="flex items-center text-sm text-[#39be82] group-hover:text-[#327c5c] transition-colors">
+          View guide
+          <svg className="ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+
+    <a href="/development/building" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#39be82] dark:hover:border-[#39be82] overflow-hidden no-underline transition-all bg-white dark:bg-[#1a1d27]">
+      <div className="p-6">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2">Development</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">Building, testing, and contributing to SupaSync</p>
+        <div className="flex items-center text-sm text-[#39be82] group-hover:text-[#327c5c] transition-colors">
+          View guide
+          <svg className="ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+  </div>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="rounded-2xl border border-gray-200 dark:border-[#27272a] bg-gradient-to-br from-gray-50 to-white dark:from-[#1a1d27] dark:to-[#121212] p-8 sm:p-12 text-center">
+    <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">Ready to sync your vault?</h2>
+    <p className="mt-4 text-base text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
+      Install SupaSync and start backing up your Obsidian notes to Supabase in minutes.
+    </p>
+    <div className="mt-6">
+      <a 
+        href="/quickstart" 
+        className="inline-flex items-center px-6 py-3 rounded-lg bg-[#39be82] hover:bg-[#327c5c] text-white font-semibold transition-colors shadow-lg shadow-[#39be82]/20"
+      >
+        Get Started
+        <svg className="ml-2 w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+        </svg>
+      </a>
+    </div>
+  </div>
+</div>

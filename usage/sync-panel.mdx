@@ -1,0 +1,254 @@
+---
+title: Sync panel
+description: Using the sync panel to view file sync status and trigger syncs
+---
+
+The Sync panel is a right-side panel that displays real-time sync progress, file status, and provides quick access to sync operations.
+
+## Opening the Sync panel
+
+You can open the Sync panel in three ways:
+
+<Steps>
+  <Step title="Ribbon icon">
+    Click the SupaSync icon (layout sidebar right) in the left ribbon
+  </Step>
+  
+  <Step title="Command palette">
+    Open the command palette and run "Show Sync panel"
+  </Step>
+  
+  <Step title="Automatic">
+    The panel opens automatically when Obsidian loads (if it was open previously)
+  </Step>
+</Steps>
+
+## Panel features
+
+### Sync button
+
+The panel header contains a "Sync" button that triggers a full sync:
+
+```typescript
+// From views/sync-panel.ts:119-131
+const syncBtn = header.createEl("button", { cls: "mod-cta" });
+syncBtn.textContent = "Sync";
+syncBtn.disabled = this.isSyncing;
+syncBtn.onclick = () => {
+  this.setMessage("Checking...");
+  this.plugin.runFullSync().catch((err) => {
+    this.setMessage(`Error: ${err.message}`);
+  });
+};
+```
+
+The button is disabled during active syncs to prevent concurrent operations.
+
+### File list
+
+During a sync, the panel displays a list of all files being processed:
+
+<Accordion title="File list example">
+  ```
+  Notes/daily.md          [new]
+  Journal/entry.md        [modified]
+  Archive/old.md          [delete]
+  ```
+  
+  Each file shows:
+  - File path
+  - Action badge (new, modified, delete)
+  - Status icon (pending, in progress, completed, failed)
+</Accordion>
+
+### Status icons
+
+Each file in the list has an icon indicating its current status:
+
+| Status | Icon | Description |
+|--------|------|-------------|
+| `pending` | `circle` | File is queued for sync |
+| `in_progress` | `loader` (spinning) | File is currently syncing |
+| `completed` | `check-circle` | File synced successfully |
+| `failed` | `x-circle` | File failed to sync |
+
+```typescript
+// From views/sync-panel.ts:84-97
+private getStatusIcon(status: SyncFileStatus): string {
+  switch (status) {
+    case "pending":
+      return "circle";
+    case "in_progress":
+      return "loader";
+    case "completed":
+      return "check-circle";
+    case "failed":
+      return "x-circle";
+  }
+}
+```
+
+<Info>
+  The `loader` icon for in-progress files includes a CSS animation class `supasync-panel-icon-spin` for visual feedback.
+</Info>
+
+### Action badges
+
+Action badges indicate what operation is being performed:
+
+```typescript
+// From views/sync-panel.ts:99-110
+private getActionLabel(action: SyncFileAction): string {
+  switch (action) {
+    case "new":
+      return "new";
+    case "modified":
+      return "modified";
+    case "delete":
+      return "delete";
+  }
+}
+```
+
+- **new**: File doesn't exist in Supabase yet
+- **modified**: File exists but content has changed
+- **delete**: File was deleted from vault and will be removed from Supabase
+
+## Panel states
+
+### Empty state
+
+When no sync has been run yet:
+
+```
+SupaSync
+[Sync]
+
+No sync run. Click Sync to sync configured folders.
+```
+
+### Scanning state
+
+During initial file scanning:
+
+```
+SupaSync
+[Sync] (disabled)
+
+Scanning files...
+```
+
+### Syncing state
+
+During an active sync, the panel shows:
+- Disabled sync button
+- File list with real-time status updates
+- Progress as files are processed
+
+### Message state
+
+The panel can display messages for:
+- **Authentication errors**: "Sign in required to sync"
+- **Configuration errors**: "Sync not available. Check settings."
+- **Sync errors**: "Sync failed: [error message]"
+- **Status updates**: "Checking..."
+
+```typescript
+// From views/sync-panel.ts:72-75
+setMessage(msg: string | null): void {
+  this.message = msg;
+  this.render();
+}
+```
+
+<Warning>
+  If you see "Sign in required to sync", open Settings → SupaSync and sign in with your Supabase credentials.
+</Warning>
+
+## Panel lifecycle
+
+The panel is registered when the plugin loads:
+
+```typescript
+// From main.ts:39
+this.registerView(
+  SYNC_PANEL_VIEW_TYPE,
+  (leaf) => new SyncPanelView(leaf, this)
+);
+```
+
+When the panel opens, it registers itself with the plugin:
+
+```typescript
+// From views/sync-panel.ts:39-41
+async onOpen(): Promise<void> {
+  this.plugin.syncPanelView = this;
+  this.render();
+}
+```
+
+When closed, it deregisters:
+
+```typescript
+// From views/sync-panel.ts:44-47
+async onClose(): Promise<void> {
+  this.plugin.syncPanelView = null;
+  this.fileListEl = null;
+}
+```
+
+## Real-time updates
+
+The panel receives real-time updates during sync via callbacks:
+
+```typescript
+// From main.ts:231-234
+panelCallbacks: {
+  onFileList: (items) => this.syncPanelView?.setFileList(items),
+  onFileStatus: (path, status) => this.syncPanelView?.setFileStatus(path, status),
+}
+```
+
+### File list updates
+
+When a full sync starts, the complete file list is sent to the panel:
+
+```typescript
+// From views/sync-panel.ts:49-56
+setFileList(items: { path: string; action: SyncFileAction }[]): void {
+  this.fileItems = items.map((item) => ({
+    path: item.path,
+    action: item.action,
+    status: "pending" as SyncFileStatus,
+  }));
+  this.render();
+}
+```
+
+All files start with `pending` status.
+
+### Status updates
+
+As each file is processed, its status is updated:
+
+```typescript
+// From views/sync-panel.ts:58-64
+setFileStatus(path: string, status: SyncFileStatus): void {
+  const item = this.fileItems.find((f) => f.path === path);
+  if (item) {
+    item.status = status;
+    this.render();
+  }
+}
+```
+
+This provides real-time feedback as the sync progresses through batches.
+
+## Integration with status bar
+
+The Sync panel works alongside the status bar to provide sync feedback:
+
+- **Status bar**: Shows "Last sync: Xm ago" or current sync status
+- **Sync panel**: Shows detailed file-by-file progress
+
+Both are updated via the same callback system in `main.ts:206-235`.

@@ -1,0 +1,106 @@
+---
+title: Installation
+description: Step-by-step guide to building and installing SupaSync in your Obsidian vault
+---
+
+SupaSync is not yet available in the Obsidian Community Plugins directory. To install it, you'll need to build the plugin from source and manually copy it to your vault's plugins folder.
+
+## Prerequisites
+
+Before you begin, ensure you have:
+
+- **Node.js** and **npm** installed on your system
+- **Git** for cloning the repository
+- An **Obsidian vault** where you want to install the plugin
+
+## Building from source
+
+<Steps>
+  <Step title="Clone the repository">
+    Clone the SupaSync repository to your local machine:
+    
+    ```bash
+    git clone https://github.com/yourusername/supasync.git
+    cd supasync
+    ```
+  </Step>
+  
+  <Step title="Install dependencies">
+    Install the required npm packages:
+    
+    ```bash
+    npm install
+    ```
+  </Step>
+  
+  <Step title="Build the plugin">
+    Run the build script to compile the plugin:
+    
+    ```bash
+    npm run build
+    ```
+    
+    This command runs TypeScript type checking and then uses esbuild to bundle the plugin into `main.js`.
+    
+    <Note>
+    For development, you can use `npm run dev` to watch for changes and rebuild automatically.
+    </Note>
+  </Step>
+</Steps>
+
+## Installing to your vault
+
+After building the plugin, you need to copy the necessary files to your Obsidian vault's plugins directory.
+
+<Steps>
+  <Step title="Create the plugin folder">
+    Navigate to your vault's plugins directory and create a folder named `supasync`:
+    
+    ```bash
+    mkdir -p /path/to/your/vault/.obsidian/plugins/supasync
+    ```
+    
+    Replace `/path/to/your/vault` with the actual path to your Obsidian vault.
+  </Step>
+  
+  <Step title="Copy plugin files">
+    Copy `main.js` and `manifest.json` from the build output to the plugin folder:
+    
+    ```bash
+    cp main.js /path/to/your/vault/.obsidian/plugins/supasync/
+    cp manifest.json /path/to/your/vault/.obsidian/plugins/supasync/
+    ```
+  </Step>
+  
+  <Step title="Enable the plugin in Obsidian">
+    1. Open Obsidian and go to Settings → Community plugins
+    2. Ensure "Restricted mode" is disabled (if prompted)
+    3. Click "Browse" to see installed plugins
+    4. Find **SupaSync** in the list and toggle it on
+  </Step>
+</Steps>
+
+<Warning>
+If you don't see SupaSync in the plugins list, try restarting Obsidian or checking that the files are in the correct location.
+</Warning>
+
+## Verifying installation
+
+To confirm SupaSync is installed correctly:
+
+1. Check for the SupaSync ribbon icon (sidebar icon) on the left side of Obsidian
+2. Open the Command Palette (Cmd/Ctrl + P) and search for "SupaSync" - you should see commands like:
+   - **SupaSync: Full Sync**
+   - **SupaSync: Show Sync panel**
+   - **SupaSync: Cancel Sync**
+3. Go to Settings and verify that **SupaSync** appears in the plugin settings
+
+## Next steps
+
+Now that SupaSync is installed, you need to:
+
+1. Configure your Supabase project (if you haven't already)
+2. Enter your Supabase credentials in the plugin settings
+3. Sign in and start syncing
+
+Head to the [Quickstart](/quickstart) guide to complete the setup and perform your first sync.

@@ -1,80 +1,192 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get started with SupaSync in minutes - from configuration to your first successful sync
 ---
 
-## Get started in three steps
+This guide walks you through configuring SupaSync and performing your first sync from your Obsidian vault to Supabase.
 
-Get your documentation site running locally and make your first customization.
+<Note>
+Before starting, ensure you have:
+- Installed SupaSync in your vault (see [Installation](/installation))
+- A Supabase project with the `notes` table and RLS configured
+</Note>
 
-### Step 1: Set up your local environment
+## Configure Supabase credentials
+
+<Steps>
+  <Step title="Open SupaSync settings">
+    In Obsidian, go to Settings → SupaSync (found under "Plugin Options" or "Community plugins").
+  </Step>
+  
+  <Step title="Enter your Supabase URL and anon key">
+    1. In your Supabase Dashboard, navigate to Settings → API
+    2. Copy your **Project URL** and paste it into the Supabase URL field
+    3. Copy your **anon** key (not the service_role key) and paste it into the Anon key field
+    
+    <Warning>
+    Never use the `service_role` key in the plugin. Always use the `anon` key with RLS enabled for security.
+    </Warning>
+  </Step>
+</Steps>
+
+## Sign in
+
+Authentication is required before you can sync. SupaSync supports two sign-in methods:
+
+<Tabs>
+  <Tab title="Email/Password">
+    1. In the SupaSync settings, locate the **Authentication** section
+    2. Enter your email address and password
+    3. Click **Sign in**
+    4. If you don't have an account, you can sign up first in your Supabase Dashboard or use the Auth UI
+    
+    Once signed in, you'll see your user email displayed and the session will persist across Obsidian restarts.
+  </Tab>
+  
+  <Tab title="Google OAuth">
+    1. In the SupaSync settings, locate the **Authentication** section
+    2. Click **Sign in with Google**
+    3. A browser window will open for Google authentication
+    4. Complete the Google sign-in flow
+    5. Return to Obsidian
+    
+    <Note>
+    Google OAuth requires the redirect URL `http://127.0.0.1:38473/auth/callback` to be configured in both Google Cloud Console and Supabase Dashboard → Authentication → URL Configuration.
+    </Note>
+  </Tab>
+</Tabs>
+
+## Configure sync options
+
+Customize how SupaSync handles your files:
+
+### Sync folders
+
+- **Empty list** (default): Syncs your entire vault
+- **Specific folders**: Add folder paths to sync only those folders (e.g., `Notes`, `Daily`, `Projects/Work`)
+
+<Note>
+A file is synced if the sync folders list is empty, or if the file path matches a folder exactly or starts with `folder/`.
+</Note>
+
+### Auto-sync
+
+Toggle **Auto-sync** to automatically sync files when they are created, modified, deleted, or renamed within the configured scope.
+
+- **Enabled**: Changes are synced immediately (with 750ms debounce for modifications)
+- **Disabled**: You must manually trigger sync via command palette or Sync panel
+
+## Perform your first sync
+
+Now you're ready to sync your notes to Supabase.
+
+<Steps>
+  <Step title="Open the Sync panel">
+    Click the SupaSync ribbon icon (layout-sidebar-right icon) on the left sidebar, or use Command Palette → **SupaSync: Show Sync panel**.
+    
+    The Sync panel opens on the right side and displays:
+    - List of files in scope
+    - Status for each file (pending, in progress, completed, failed)
+    - A sync button
+  </Step>
+  
+  <Step title="Start the sync">
+    Click the **Sync** button in the Sync panel, or use Command Palette → **SupaSync: Full Sync**.
+    
+    You'll see:
+    - A progress notice showing "Syncing X of Y"
+    - Status bar at the bottom showing "SupaSync: Syncing..."
+    - File statuses updating in the Sync panel
+  </Step>
+  
+  <Step title="Review the results">
+    When the sync completes, you'll see:
+    - A summary in the status bar (e.g., "✓ 25 new, 3 modified" or "✗ 2 failed")
+    - Updated file statuses in the Sync panel
+    - The sync completes with a notice
+    
+    <Note>
+    The status bar shows the last sync time and updates automatically (e.g., "Last sync: 5m ago").
+    </Note>
+  </Step>
+</Steps>
+
+## Using SupaSync
+
+Now that you've completed your first sync, here's how to use SupaSync day-to-day:
+
+### Manual sync
+
+<CodeGroup>
+```text Command Palette
+Cmd/Ctrl + P → "SupaSync: Full Sync"
+```
+
+```text Sync Panel
+Click the Sync button in the right sidebar panel
+```
+</CodeGroup>
+
+### Auto-sync
+
+If enabled in settings, SupaSync automatically syncs:
+- **New files**: Synced immediately when created
+- **Modified files**: Synced 750ms after the last change (debounced)
+- **Deleted files**: Removed from Supabase immediately
+- **Renamed files**: Old path deleted, new path synced
+
+<Warning>
+Auto-sync is paused during a full sync and for 5 seconds after plugin load to avoid conflicts.
+</Warning>
+
+### Cancel sync
+
+If you need to stop a sync in progress:
+
+```text Command Palette
+Cmd/Ctrl + P → "SupaSync: Cancel Sync"
+```
+
+### Monitor sync status
+
+Check the **status bar** at the bottom-right of Obsidian:
+- **Last sync: Xm ago** - Time since last successful sync
+- **Syncing...** - Sync in progress
+- **✓ N new, N modified** - Success summary
+- **✗ N failed** - Error count
+
+## Troubleshooting
 
 <AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
+  <Accordion title="Sync fails with 'Sign in required'">
+    You need to authenticate before syncing. Go to Settings → SupaSync → Authentication and sign in with email/password or Google.
   </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
+  
+  <Accordion title="'Sync not available. Check settings.'">
+    Verify that:
+    - Your Supabase URL and anon key are entered correctly
+    - Your Supabase project is accessible
+    - The `notes` table exists with proper RLS policies
   </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
+  
+  <Accordion title="Some files fail to sync">
+    Failed files are reported in the sync summary. Common causes:
+    - RLS policy misconfiguration
+    - Network connectivity issues
+    - Invalid file content (extremely large files)
     
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
+    Check the Supabase logs in your Dashboard → Logs for details.
+  </Accordion>
+  
+  <Accordion title="Google OAuth shows 'Could not start callback server'">
+    This can happen if port 38473 is in use. As a workaround, use email/password authentication instead. Ensure `http://127.0.0.1:38473/auth/callback` is in your Supabase Redirect URLs.
   </Accordion>
 </AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
+You've successfully configured SupaSync and performed your first sync! Explore more:
 
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>
+- Learn about [sync behavior and best practices](#)
+- Configure [advanced settings](#)
+- Set up [webhook integrations](#) with your synced notes

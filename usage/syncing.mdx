@@ -1,0 +1,169 @@
+---
+title: Syncing
+description: Learn how to perform full sync and incremental sync with scope rules and batching
+---
+
+SupaSync provides two types of sync operations: full sync and incremental sync. Both respect your configured sync folders and use hash-based change detection to avoid unnecessary uploads.
+
+## Full sync
+
+Full sync scans all markdown files in your configured scope, compares their content hashes against local state, and syncs any new, modified, or deleted files to Supabase.
+
+<Steps>
+  <Step title="Scan files">
+    SupaSync scans all markdown files in your vault that match your sync scope. Files are filtered based on your configured sync folders.
+  </Step>
+  
+  <Step title="Detect changes">
+    Each file's content is hashed using SHA256. The hash is compared against stored state to identify:
+    - **New files**: No stored hash exists
+    - **Modified files**: Hash differs from stored hash
+    - **Deleted files**: Stored hash exists but file is missing
+  </Step>
+  
+  <Step title="Upload in batches">
+    Changes are uploaded to Supabase in batches of 50 files. The sync yields to the UI every 8 files to prevent freezing Obsidian.
+  </Step>
+  
+  <Step title="Update state">
+    Successfully synced files have their hashes stored locally. Failed files are not updated, so they'll be retried on the next sync.
+  </Step>
+</Steps>
+
+### Running full sync
+
+You can trigger a full sync in three ways:
+
+1. **Command palette**: Open command palette and run "Full Sync"
+2. **Sync panel**: Click the "Sync" button in the Sync panel
+3. **Ribbon icon**: Click the SupaSync icon and use the sync button
+
+<Note>
+  Full sync is idempotent—you can run it multiple times safely. Only changed files are uploaded.
+</Note>
+
+## Incremental sync
+
+Incremental sync processes a single file when it's created, modified, renamed, or deleted. This happens automatically when auto-sync is enabled.
+
+### How incremental sync works
+
+```typescript
+// From sync/sync.incremental.ts
+const content = await vault.read(file);
+const hash = computeHash(content);
+const storedHash = stateManager.getHash(file.path);
+
+if (storedHash === hash) {
+  logger.info(`File unchanged, skipping: ${file.path}`);
+  return { success: true, skipped: true, path: file.path };
+}
+```
+
+Incremental sync:
+- Checks if the file is in scope
+- Computes the file's content hash
+- Skips the upload if the hash matches stored state
+- Uploads the file if it's new or modified
+- Updates local state on success
+
+<Info>
+  Incremental sync on modify events uses a 750ms debounce to avoid syncing on every keystroke. Create and delete events sync immediately.
+</Info>
+
+## Scope rules
+
+Files are synced only if they match your configured scope. The scope is determined by the `syncFolders` setting.
+
+### Scope logic
+
+```typescript
+// From sync/sync.scope.ts
+function isInScope(filePath: string, syncFolders: string[]): boolean {
+  if (syncFolders.length === 0) {
+    return true; // Empty list = sync entire vault
+  }
+  
+  for (const folder of syncFolders) {
+    const norm = normalizeFolder(folder);
+    if (filePath === norm || filePath.startsWith(norm + "/")) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+```
+
+**Rules**:
+- **Empty list**: All markdown files in the vault are synced
+- **With folders**: Only files in the specified folders (or their subfolders) are synced
+- **Exact match**: A file at `Notes` matches the folder `Notes`
+- **Prefix match**: A file at `Notes/daily.md` matches the folder `Notes`
+
+### Examples
+
+| Sync folders | File path | In scope? |
+|-------------|-----------|----------|
+| `[]` (empty) | `anywhere/file.md` | Yes |
+| `["Notes"]` | `Notes/daily.md` | Yes |
+| `["Notes"]` | `Notes/sub/file.md` | Yes |
+| `["Notes"]` | `Journal/entry.md` | No |
+| `["Notes", "Journal"]` | `Journal/entry.md` | Yes |
+
+## Batching and performance
+
+Full sync uses batching to handle large vaults efficiently:
+
+- **Batch size**: 50 files per batch
+- **Yield frequency**: Every 8 files during scanning
+- **UI responsiveness**: Each batch yields to the main thread with a 10ms timeout
+
+This ensures Obsidian remains responsive even when syncing thousands of files.
+
+```typescript
+// From sync/sync.full.ts:29-30
+const BATCH_SIZE = 50;
+const YIELD_EVERY = 8;
+```
+
+## Sync behavior
+
+### Delete detection
+
+SupaSync detects deleted files by comparing the current file list against stored state:
+
+```typescript
+// Files that have stored hashes but are no longer in the vault
+const deletedPaths = stateManager.detectDeletedPaths(Array.from(currentPaths));
+```
+
+Deleted files are removed from Supabase and their hashes are cleared from local state.
+
+### Rename handling
+
+When a file is renamed:
+1. The old path is treated as a deletion
+2. The new path is treated as a new file
+3. Both operations are synced to Supabase
+
+### Error handling
+
+If a file fails to sync:
+- Its path is added to `failedPaths` in the result
+- Its hash is **not** updated in local state
+- It will be retried on the next full sync
+- A sync log is written to `_system/sync-log.md`
+
+<Warning>
+  Failed uploads do not update local state, so they'll be retried on subsequent syncs. Check `_system/sync-log.md` for failure details.
+</Warning>
+
+## Cancelling sync
+
+You can cancel an in-progress sync using the "Cancel Sync" command from the command palette. This:
+- Aborts the current operation
+- Saves state for already-synced files
+- Shows "Sync cancelled" in the status bar
+
+See [Commands](/usage/commands#cancel-sync) for more details.

@@ -1,0 +1,96 @@
+---
+title: Introduction
+description: Learn about SupaSync, an Obsidian plugin that provides one-way sync from your vault to Supabase with authentication and incremental updates
+---
+
+SupaSync is an Obsidian plugin that enables one-way synchronization from your Obsidian vault to Supabase. It syncs plain markdown files only—no images, graph data, or backlinks—providing a deterministic, incremental, folder-scoped sync with delete detection.
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="One-way sync" icon="arrow-right">
+    Vault → Supabase. Syncs plain markdown including path, title, and content. Frontmatter is ignored.
+  </Card>
+  <Card title="Hash-based incremental sync" icon="fingerprint">
+    Uses SHA256 hash of content to detect changes. Only new or changed files are uploaded.
+  </Card>
+  <Card title="Folder scope" icon="folder">
+    Sync your entire vault or specific folders. Empty folder list syncs the whole vault.
+  </Card>
+  <Card title="Delete detection" icon="trash">
+    Automatically removes notes from Supabase when files are deleted or renamed in your vault.
+  </Card>
+  <Card title="Manual and auto-sync" icon="sync">
+    Full sync via command palette or Sync panel. Optional auto-sync listens to file create, modify, delete, and rename events with debounce.
+  </Card>
+  <Card title="Authentication" icon="lock">
+    Email/password and Google OAuth support. Session persisted in plugin data. Sync requires sign-in.
+  </Card>
+  <Card title="Sync panel" icon="sidebar">
+    Right-side panel with file list, status icons, and sync button for easy monitoring.
+  </Card>
+  <Card title="Status bar" icon="chart-line">
+    Shows last sync time, "Syncing..." indicator, and result summary (new/modified/failed files).
+  </Card>
+</CardGroup>
+
+## Requirements
+
+Before installing SupaSync, ensure you have:
+
+- **Obsidian** 0.15.0 or later
+- **Supabase project** with:
+  - A `notes` table
+  - Row Level Security (RLS) enabled
+  - Auth configured (email/password and/or Google)
+
+<Note>
+See the [Supabase Setup](#supabase-setup) section below for detailed instructions on configuring your Supabase project.
+</Note>
+
+## How it works
+
+SupaSync uses a hash-based approach to efficiently sync your notes:
+
+1. **Local state tracking**: The plugin stores SHA256 hashes of synced files and tracks the last full sync time in plugin data
+2. **Scope filtering**: Files are synced if your sync folders list is empty (whole vault) or if the file path matches a configured folder
+3. **Incremental updates**: Only files with changed content hashes are uploaded to Supabase
+4. **Delete detection**: When files are deleted or renamed, the corresponding records are removed from Supabase
+5. **Batching**: Full sync uploads files in batches and yields to the UI to prevent freezing
+
+### Sync behavior
+
+- **Idempotent**: Safe to run full sync repeatedly. Upsert uses `(user_id, path)` conflict resolution
+- **Error handling**: Failed paths are reported; local hash state is not updated for failed items
+- **No service_role key**: Uses only anon key + RLS for security
+
+## Supabase setup
+
+To use SupaSync, you need to configure your Supabase project:
+
+<Steps>
+  <Step title="Create a Supabase project">
+    Visit [supabase.com](https://supabase.com) and create a new project. Navigate to Settings → API and note your **Project URL** and **anon key**.
+  </Step>
+  
+  <Step title="Run database migration">
+    Create the `notes` table with RLS enabled. The table must have:
+    - `user_id` column (from Supabase Auth)
+    - Unique constraint on `(user_id, path)`
+    - RLS policies that allow only authenticated users to read/write their own rows
+    
+    Refer to `specs/supabase-rls.md` in the repository for the SQL migration.
+  </Step>
+  
+  <Step title="Enable authentication providers">
+    In Supabase Dashboard → Authentication:
+    - **Email/Password**: Enabled by default
+    - **Google** (optional): Enable Google provider and add redirect URL `http://127.0.0.1:38473/auth/callback` in both Google Cloud Console and Supabase Redirect URLs
+  </Step>
+</Steps>
+
+<Warning>
+Ensure RLS is properly configured. The plugin uses only the anon key, so your data security depends on correct RLS policies.
+</Warning>
+
+For detailed setup instructions, see the [Installation](/installation) and [Quickstart](/quickstart) guides.

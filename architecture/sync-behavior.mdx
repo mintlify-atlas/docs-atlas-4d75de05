@@ -1,0 +1,317 @@
+---
+title: Sync behavior
+description: How SupaSync's incremental sync works internally with hash-based detection and local state management
+---
+
+SupaSync implements a deterministic, hash-based sync system that only uploads files when their content changes. This approach minimizes network traffic and provides fast, predictable sync behavior.
+
+## Hash-based change detection
+
+### How it works
+
+SupaSync uses SHA256 hashing to detect content changes:
+
+1. **Hash computation**: When reading a file, compute `SHA256(content)` as a hex string
+2. **State comparison**: Compare computed hash with stored hash in local state
+3. **Decision**:
+   - No stored hash → File is **NEW**
+   - Stored hash differs → File is **MODIFIED**
+   - Stored hash matches → File is **UNCHANGED** (skip)
+
+```typescript
+const content = await vault.read(file);
+const hash = computeHash(content); // SHA256 hex digest
+const storedHash = stateManager.getHash(file.path);
+
+if (!storedHash) {
+  // NEW file
+} else if (storedHash !== hash) {
+  // MODIFIED file
+} else {
+  // UNCHANGED - skip
+}
+```
+
+<Info>
+The hash is computed from the raw markdown content. Frontmatter is included in the content sent to Supabase but is not parsed or used for any decision-making.
+</Info>
+
+### Why SHA256?
+
+- **Deterministic**: Same content always produces same hash
+- **Fast**: Efficient computation even for large files
+- **Collision-resistant**: Virtually impossible for different content to produce same hash
+- **Standard**: Well-tested cryptographic hash function
+
+## Local state management
+
+SupaSync maintains a local state file stored in Obsidian plugin data:
+
+### State structure
+
+```typescript
+interface LocalSyncState {
+  fileHashes: Record<string, string>; // path -> SHA256 hash
+  lastFullSync: string | null;         // ISO timestamp
+}
+```
+
+### State operations
+
+The `StateManager` class provides these operations:
+
+| Method | Purpose |
+|--------|--------|
+| `loadState()` | Load state from plugin data on startup |
+| `saveState()` | Persist state to plugin data |
+| `getHash(path)` | Retrieve stored hash for a file |
+| `setHash(path, hash)` | Update hash after successful sync |
+| `removeHash(path)` | Remove hash after successful delete |
+| `detectDeletedPaths(currentPaths)` | Find files that were deleted from vault |
+
+<Warning>
+State is only updated AFTER successful remote operations. If a network request fails, the local hash is not updated, ensuring the file will be retried on the next sync.
+</Warning>
+
+### State persistence
+
+- State is loaded when the plugin starts
+- State is saved after each successful sync operation
+- State is stored in `.obsidian/plugins/supasync/data.json` as `localSyncState`
+- If state is lost or corrupted, the next full sync treats all files as NEW
+
+## Full sync algorithm
+
+Full sync is triggered manually via command palette or the sync panel button.
+
+### Steps
+
+1. **Get all markdown files** from the vault
+2. **Filter by scope**: Only include files in configured `syncFolders` (or all files if empty)
+3. **Scan each file**:
+   - Read content
+   - Compute hash
+   - Compare with stored hash
+   - Categorize as NEW, MODIFIED, or UNCHANGED
+4. **Detect deletions**:
+   - Compare stored file paths with current vault paths
+   - Files in state but not in vault are DELETED
+5. **Batch upsert**:
+   - Upload NEW and MODIFIED files in batches of 50
+   - Use `on conflict (user_id, path) do update` for idempotency
+6. **Batch delete**:
+   - Remove deleted files from Supabase in batches of 50
+7. **Update state**:
+   - Store new hashes for successfully synced files
+   - Remove hashes for deleted files
+   - Record `lastFullSync` timestamp
+8. **Write sync log** to `_system/sync-log.md`
+
+### Code flow (sync.full.ts)
+
+```typescript
+export async function fullSync(
+  vault: Vault,
+  syncFolders: string[],
+  api: SupabaseAPI,
+  stateManager: StateManager,
+  onProgress?: FullSyncProgressCallback,
+  signal?: AbortSignal
+): Promise<FullSyncResult>
+```
+
+Key implementation details:
+
+- **Yielding to UI**: Every 8 file operations, yield to the main thread for 10ms to prevent UI freezing
+- **Abort support**: Check `signal.aborted` before expensive operations
+- **Partial failure handling**: Failed files are logged but don't stop the entire sync
+- **State safety**: State is only updated for successful operations
+
+## Incremental sync (auto-sync)
+
+When auto-sync is enabled, individual file changes trigger incremental sync:
+
+### Workflow
+
+1. **Vault event** (create, modify, delete, rename) fires
+2. **Debounce**: Wait 500-1000ms to batch rapid changes
+3. **Scope check**: Verify file is in configured folders
+4. **Hash comparison**: Check if content actually changed
+5. **Conditional upload**: Only upload if hash differs
+6. **State update**: Store new hash after successful upload
+
+### Implementation (sync.incremental.ts)
+
+```typescript
+export async function syncFile(
+  file: TFile,
+  syncFolders: string[],
+  api: SupabaseAPI,
+  stateManager: StateManager,
+  vault: any
+): Promise<SyncFileResult>
+```
+
+Key steps:
+
+1. Check if file is markdown (`.md` extension)
+2. Check if file is in scope using `isInScope(path, syncFolders)`
+3. Read content and compute hash
+4. Compare with stored hash—skip if unchanged
+5. Upsert to Supabase if changed
+6. Update state and save only on success
+
+<Info>
+Incremental sync is fast because unchanged files are skipped entirely—no network request is made if the hash matches.
+</Info>
+
+## Delete detection
+
+SupaSync uses two mechanisms to detect deleted files:
+
+### 1. Real-time (auto-sync enabled)
+
+When a file is deleted or renamed in the vault:
+
+```typescript
+async handleDelete(path: string): Promise<boolean> {
+  if (!isInScope(path)) return false;
+  return await deleteNote(path, api, stateManager);
+}
+```
+
+- Delete the note from Supabase by path
+- Remove the hash from local state
+- Only update state on successful remote delete
+
+### 2. Full sync reconciliation
+
+During full sync, compare stored paths with current vault:
+
+```typescript
+const currentPaths = new Set(scopedFiles.map(f => f.path));
+const deletedPaths = stateManager.detectDeletedPaths(Array.from(currentPaths));
+```
+
+**`detectDeletedPaths` logic**:
+- Get all paths from `fileHashes` state
+- Check each stored path against current vault paths
+- Paths in state but not in vault are deleted
+- Return list of deleted paths for batch removal
+
+This catches deletions that occurred while auto-sync was disabled or if the plugin was not loaded.
+
+## Idempotency
+
+SupaSync is designed to be safe to run repeatedly:
+
+### Upsert with conflict resolution
+
+All uploads use Supabase upsert with a unique constraint:
+
+```typescript
+await client.from("notes").upsert(notesWithUser, {
+  onConflict: "user_id,path"
+});
+```
+
+- If `(user_id, path)` already exists, the row is **updated**
+- If not, a new row is **inserted**
+- This prevents duplicates and makes uploads idempotent
+
+### State-based decisions
+
+- The plugin trusts local state as the source of truth for what needs syncing
+- No need to query Supabase to check what exists remotely
+- If state is lost, full sync safely re-uploads everything (upsert prevents duplicates)
+
+<Note>
+You can run full sync as many times as you want. It will only upload files that have changed since the last successful sync.
+</Note>
+
+## Batching
+
+To handle large vaults without freezing the UI:
+
+### Batch size
+
+- **Upsert batch**: 50 notes per request
+- **Delete batch**: 50 paths per request
+
+### Yielding to main thread
+
+```typescript
+const YIELD_EVERY = 8;
+
+if (processed > 0 && processed % YIELD_EVERY === 0) {
+  await yieldToMain(); // setTimeout 10ms
+}
+```
+
+- Every 8 file operations, pause for 10ms
+- Allows UI to remain responsive
+- Progress updates are sent during yields
+
+### Timeouts
+
+- **Single operation**: 15 seconds
+- **Batch operation**: 30 seconds
+
+If a request times out, it's treated as a failure and can be retried on the next sync.
+
+## Error handling
+
+### Network failures
+
+- Display error notice to user
+- **Do not mutate local state**
+- Failed files are logged in `failedPaths` array
+- Retry on next sync (hash still doesn't match)
+
+### Partial batch failures
+
+If some files in a batch fail:
+
+1. Log failed paths in sync result
+2. Continue with remaining batches
+3. Only update state for successful files
+4. Write failures to `_system/sync-log.md`
+
+### State corruption prevention
+
+**Critical rule**: State is updated ONLY after successful remote operations.
+
+```typescript
+const result = await api.upsertNotes([note]);
+if (result.success) {
+  stateManager.setHash(file.path, hash); // Only on success
+  await stateManager.saveState();
+}
+```
+
+If the remote operation fails, the old hash remains in state, ensuring the file will be retried.
+
+## First run behavior
+
+When the plugin runs for the first time (or if local state is empty):
+
+1. `fileHashes` is empty
+2. All scoped files have no stored hash
+3. All files are categorized as NEW
+4. All files are uploaded in batches
+5. State is populated with hashes
+6. Subsequent syncs only upload changed files
+
+## Performance at scale
+
+SupaSync is designed to handle large vaults (5,000+ files) efficiently:
+
+- **No blocking loops**: All operations are async with yields
+- **Minimal remote queries**: Trust local state instead of fetching remote data
+- **Batch operations**: Reduce network round-trips
+- **Skip unchanged files**: Only process files with hash mismatches
+- **Abort support**: Cancel long-running operations if needed
+
+<Info>
+For a vault with 5,000 files where only 10 files changed, full sync will skip 4,990 files and only upload 10. This makes subsequent syncs very fast.
+</Info>

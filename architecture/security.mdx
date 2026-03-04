@@ -1,0 +1,372 @@
+---
+title: Security model
+description: How SupaSync secures user data with RLS, authentication, and proper isolation
+---
+
+SupaSync implements a security model based on Row Level Security (RLS), user authentication, and proper data isolation. No service role keys are stored in the plugin—only authenticated user sessions are used.
+
+## Authentication model
+
+### Supported methods
+
+SupaSync supports two authentication methods:
+
+1. **Email and password**: Standard Supabase email/password authentication
+2. **Google OAuth**: OAuth 2.0 flow with Google as the provider
+
+### OAuth flow (Google)
+
+The Google OAuth flow uses a temporary local callback server:
+
+1. **Initiate**: User clicks "Sign in with Google"
+2. **Start callback server**: Plugin starts HTTP server on `http://127.0.0.1:38473`
+3. **Open browser**: Plugin opens Google OAuth URL in browser
+4. **User consents**: User signs in with Google and grants permissions
+5. **Callback**: Google redirects to `http://127.0.0.1:38473/auth/callback`
+6. **Token exchange**: Plugin receives OAuth code and exchanges it with Supabase for session tokens
+7. **Session established**: Access token and refresh token are stored in plugin data
+8. **Server closes**: Local callback server shuts down
+
+<Info>
+The callback server only runs during the OAuth flow and listens on localhost. The redirect URL `http://127.0.0.1:38473/auth/callback` must be configured in both Google Cloud Console and Supabase redirect URLs.
+</Info>
+
+### Session persistence
+
+Authentication sessions are persisted in Obsidian plugin data:
+
+```typescript
+{
+  accessToken: string,
+  refreshToken: string,
+  expiresAt: number
+}
+```
+
+- **Access token**: JWT used for authenticated API requests
+- **Refresh token**: Used to obtain new access tokens when they expire
+- **Expires at**: Unix timestamp for token expiration
+
+The Supabase client automatically handles token refresh when the access token expires.
+
+### Token storage security
+
+<Warning>
+Tokens are stored in Obsidian plugin data (`.obsidian/plugins/supasync/data.json`). This file should be excluded from version control and cloud sync if it contains sensitive data.
+</Warning>
+
+Tokens are:
+- ✅ Stored only via plugin `loadData/saveData` API
+- ✅ Not written to markdown files
+- ✅ Not written to sync logs
+- ✅ Not logged to console
+- ✅ Not exposed in global variables
+- ❌ Not hardcoded in source
+
+## Row Level Security (RLS)
+
+SupaSync relies entirely on Supabase Row Level Security to enforce data isolation between users.
+
+### Database structure
+
+The `notes` table must have this structure:
+
+```sql
+CREATE TABLE notes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  path text NOT NULL,
+  title text,
+  content text NOT NULL,
+  hash text NOT NULL,
+  updated_at timestamptz DEFAULT now(),
+  UNIQUE (user_id, path)
+);
+```
+
+### Enable RLS
+
+```sql
+ALTER TABLE notes ENABLE ROW LEVEL SECURITY;
+```
+
+This prevents any access to the table unless explicitly allowed by policies.
+
+### Required policies
+
+SupaSync requires four RLS policies:
+
+#### 1. SELECT policy
+
+```sql
+CREATE POLICY "User can read own notes"
+ON notes
+FOR SELECT
+USING (auth.uid() = user_id);
+```
+
+Users can only read rows where `user_id` matches their authenticated user ID.
+
+#### 2. INSERT policy
+
+```sql
+CREATE POLICY "User can insert own notes"
+ON notes
+FOR INSERT
+WITH CHECK (auth.uid() = user_id);
+```
+
+Users can only insert rows if they set `user_id` to their own ID.
+
+#### 3. UPDATE policy
+
+```sql
+CREATE POLICY "User can update own notes"
+ON notes
+FOR UPDATE
+USING (auth.uid() = user_id)
+WITH CHECK (auth.uid() = user_id);
+```
+
+Users can only update their own rows, and cannot change `user_id` to someone else's ID.
+
+#### 4. DELETE policy
+
+```sql
+CREATE POLICY "User can delete own notes"
+ON notes
+FOR DELETE
+USING (auth.uid() = user_id);
+```
+
+Users can only delete their own rows.
+
+### User ID enforcement
+
+The plugin automatically includes the authenticated user's ID in all operations:
+
+```typescript
+const { data } = await this.client.auth.getUser();
+if (!data?.user?.id) {
+  return { success: false };
+}
+
+const notesWithUser = notes.map(n => ({ ...n, user_id: data.user.id }));
+await this.client.from("notes").upsert(notesWithUser, {
+  onConflict: "user_id,path"
+});
+```
+
+This ensures:
+- Every upsert includes the current user's `user_id`
+- The unique constraint `(user_id, path)` prevents path collisions between users
+- RLS policies verify the `user_id` matches `auth.uid()`
+
+<Info>
+Alternatively, you can use a database trigger to auto-assign `user_id := auth.uid()` on insert, which prevents client-side spoofing entirely.
+</Info>
+
+## User isolation
+
+With RLS enabled and policies in place:
+
+### What's enforced
+
+- ✅ User A cannot see User B's notes
+- ✅ User A cannot modify User B's notes
+- ✅ User A cannot delete User B's notes
+- ✅ User A and User B can have the same file path (e.g., `daily/2024-01-01.md`)
+- ✅ All queries automatically filter by `user_id = auth.uid()`
+
+### What's prevented
+
+- ❌ Cross-user access
+- ❌ Anonymous public access
+- ❌ Direct table exposure without authentication
+- ❌ User ID spoofing (enforced by RLS `WITH CHECK` clauses)
+
+## No service role key usage
+
+SupaSync never uses or stores a Supabase service role key.
+
+### Why this matters
+
+The service role key bypasses RLS entirely:
+
+- If stored in the plugin, any user could extract it
+- An attacker with the service role key could access all users' data
+- Service role keys should only be used in trusted server environments
+
+### What SupaSync uses instead
+
+**Anon key + authenticated sessions**
+
+1. User provides the Supabase **anon key** (safe to expose publicly)
+2. User authenticates with email/password or Google OAuth
+3. Supabase returns an **access token** (JWT) specific to that user
+4. All API requests include `Authorization: Bearer <access_token>`
+5. RLS policies verify `auth.uid()` matches the token's user ID
+
+This ensures:
+- No privileged keys in the plugin
+- Users can only access their own data
+- Tokens are scoped to individual users
+
+<Warning>
+Never store a service role key in plugin settings or source code. If you need to perform admin operations, use Supabase SQL Editor or a trusted server environment.
+</Warning>
+
+## Request security
+
+### Authorization header
+
+All Supabase API requests automatically include:
+
+```
+Authorization: Bearer <access_token>
+```
+
+The Supabase client handles this internally:
+
+```typescript
+const client = createClient(url, anonKey, {
+  auth: {
+    persistSession: true,
+    storage: this.storage,
+    autoRefreshToken: true
+  }
+});
+```
+
+The client:
+- Reads the stored session from plugin data
+- Includes the access token in all requests
+- Automatically refreshes tokens when they expire
+
+### Transport security
+
+All Supabase requests use HTTPS:
+
+- Supabase URLs always start with `https://`
+- No HTTP endpoints are used
+- Tokens are transmitted securely
+
+## State integrity
+
+### Hash update safety
+
+Local state is only updated after successful remote operations:
+
+```typescript
+const result = await api.upsertNotes([note]);
+if (result.success) {
+  stateManager.setHash(file.path, hash); // Only on success
+  await stateManager.saveState();
+} else {
+  // State NOT updated - file will retry on next sync
+}
+```
+
+This ensures:
+- Failed uploads are automatically retried
+- No desync between local state and remote state
+- No data loss from partial failures
+
+### Delete safety
+
+Same principle applies to deletions:
+
+```typescript
+const success = await api.deleteNote(path);
+if (success) {
+  stateManager.removeHash(path); // Only on success
+  await stateManager.saveState();
+}
+```
+
+## Data exposure prevention
+
+### Sync log safety
+
+The sync log (`_system/sync-log.md`) never contains:
+
+- ❌ Access tokens
+- ❌ Refresh tokens
+- ❌ Supabase URLs with embedded tokens
+- ❌ Authorization headers
+
+It only contains:
+
+- ✅ Sync timestamps
+- ✅ File counts (new, modified, deleted)
+- ✅ Failed file paths (for debugging)
+
+### Console log safety
+
+The logger utility never prints:
+
+- ❌ Access tokens
+- ❌ Refresh tokens
+- ❌ Request headers with tokens
+
+It only logs:
+
+- ✅ Operation names ("upsertNotes", "deleteNote")
+- ✅ Success/failure status
+- ✅ Error messages (without sensitive data)
+
+## Input safety
+
+SupaSync uses the Supabase client's built-in query builder, which prevents SQL injection:
+
+```typescript
+// Safe - uses query builder
+await this.client.from("notes").upsert(notes);
+await this.client.from("notes").delete().eq("path", path);
+```
+
+<Info>
+The Supabase JS client automatically escapes parameters and uses prepared statements. No raw SQL concatenation is used in the plugin.
+</Info>
+
+## Recovery from state loss
+
+If local state is lost or corrupted:
+
+1. **Full sync treats all files as NEW**
+2. **Upsert prevents duplicates** (unique constraint on `user_id, path`)
+3. **RLS ensures data remains isolated** (user can only upsert their own rows)
+4. **State is rebuilt** with current hashes
+
+This makes state loss recoverable without data corruption.
+
+## Attack surface summary
+
+SupaSync's security model is designed to minimize attack surface:
+
+### Verified safeguards
+
+- ✅ No hardcoded credentials
+- ✅ No service role key in plugin or source
+- ✅ RLS enabled on `notes` table
+- ✅ Four policies enforce user isolation
+- ✅ Tokens stored only in plugin data
+- ✅ Tokens not written to vault or logs
+- ✅ All requests use HTTPS
+- ✅ Query builder prevents SQL injection
+- ✅ State updates only after remote success
+- ✅ Unique constraint prevents duplicates
+
+### Security checklist
+
+Before using SupaSync in production, verify:
+
+1. **RLS is enabled** on the `notes` table
+2. **All four policies** (SELECT, INSERT, UPDATE, DELETE) are created
+3. **Redirect URL** `http://127.0.0.1:38473/auth/callback` is configured in Supabase
+4. **Anon key** is used (not service role key)
+5. **Authentication is required** before sync operations
+
+<Note>
+If you're setting up SupaSync for the first time, follow the [Supabase setup guide](/setup/supabase) to configure RLS policies correctly.
+</Note>

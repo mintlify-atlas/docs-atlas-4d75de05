@@ -1,0 +1,178 @@
+---
+title: Authentication
+description: Configure authentication providers for SupaSync
+---
+
+SupaSync requires authentication because the `notes` table uses Row Level Security (RLS). You must sign in before syncing notes to Supabase.
+
+<Note>
+  The plugin supports two authentication methods: email/password (enabled by default) and Google OAuth (requires additional setup).
+</Note>
+
+## Email/Password authentication
+
+Email/password authentication is enabled by default in Supabase Auth. No additional configuration is required.
+
+### How it works
+
+1. Users enter their email and password in the SupaSync settings tab
+2. The plugin calls `signInWithPassword()` to authenticate with Supabase
+3. Supabase returns an access token and refresh token
+4. The plugin stores these tokens securely and uses them for all database operations
+5. Tokens are automatically refreshed when they expire
+
+### Signing in
+
+To sign in with email/password:
+
+<Steps>
+  <Step title="Open SupaSync settings">
+    In Obsidian, go to **Settings > SupaSync**.
+  </Step>
+  
+  <Step title="Enter your credentials">
+    In the Authentication section, enter your email and password.
+  </Step>
+  
+  <Step title="Click Sign in">
+    Click **Sign in with Email**. If successful, you'll see "Signed in as [your-email]".
+  </Step>
+</Steps>
+
+<Warning>
+  If you haven't created an account yet, you'll need to sign up through your Supabase project's authentication flow or use the Supabase dashboard to create a user manually.
+</Warning>
+
+## Google OAuth authentication
+
+Google OAuth allows users to sign in with their Google account. This requires additional setup in both Google Cloud Console and Supabase.
+
+### Configure Google OAuth
+
+<Steps>
+  <Step title="Create OAuth credentials in Google Cloud Console">
+    1. Go to [Google Cloud Console](https://console.cloud.google.com) > **APIs & Services > Credentials**
+    2. Click **Create Credentials > OAuth 2.0 Client ID**
+    3. Select **Web application** as the application type
+    4. Add this authorized redirect URI:
+    
+    ```
+    http://127.0.0.1:38473/auth/callback
+    ```
+    
+    5. Copy your **Client ID** and **Client Secret**
+  </Step>
+
+  <Step title="Configure redirect URLs in Supabase">
+    In your Supabase dashboard, go to **Authentication > URL Configuration**.
+    
+    Add the following to **Redirect URLs**:
+    
+    ```
+    http://127.0.0.1:38473/auth/callback
+    ```
+    
+    <Note>
+      This redirect URL points to a local callback server that SupaSync starts on port `38473` during OAuth sign-in.
+    </Note>
+  </Step>
+
+  <Step title="Enable Google provider in Supabase">
+    1. Go to **Authentication > Providers** in your Supabase dashboard
+    2. Enable the **Google** provider
+    3. Enter the **Client ID** and **Client Secret** from Google Cloud Console
+    4. Save the configuration
+  </Step>
+</Steps>
+
+### Signing in with Google
+
+To sign in with Google OAuth:
+
+<Steps>
+  <Step title="Click Sign in with Google">
+    In the SupaSync settings tab, click **Sign in with Google**.
+  </Step>
+  
+  <Step title="Complete authentication in browser">
+    The plugin opens your default browser to the Google OAuth consent screen. Sign in with your Google account and grant permissions.
+  </Step>
+  
+  <Step title="Return to Obsidian">
+    After successful authentication, you'll see "Signed in successfully" in the browser. Close the browser window and return to Obsidian.
+  </Step>
+</Steps>
+
+<Warning>
+  If you see "Could not start callback server", the local callback server on port `38473` failed to start. This can happen if:
+  - The port is already in use by another application
+  - Node.js `http` module is not available
+  
+  Use email/password authentication instead.
+</Warning>
+
+## How authentication works
+
+SupaSync uses Supabase Auth with persistent session storage:
+
+```typescript
+const client = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    storage: customStorage,
+    autoRefreshToken: true,
+  },
+});
+```
+
+- **Session persistence**: Access and refresh tokens are stored securely in Obsidian's plugin data
+- **Auto-refresh**: Tokens are automatically refreshed before expiration
+- **Auth state changes**: The plugin listens for `SIGNED_IN` and `SIGNED_OUT` events to update stored credentials
+
+### OAuth callback flow
+
+For Google OAuth, SupaSync implements a local callback server:
+
+1. Plugin starts HTTP server on `http://127.0.0.1:38473`
+2. Opens browser to Google OAuth URL with `redirectTo` parameter
+3. After authentication, Google redirects to the local callback server
+4. Server extracts tokens from URL fragment and calls `setSession()`
+5. Plugin stores tokens and closes the server
+
+See `auth/auth.service.ts:104-191` for the full implementation.
+
+## Signing out
+
+To sign out:
+
+1. Open **Settings > SupaSync**
+2. Click **Sign out** in the Authentication section
+3. The plugin clears stored tokens and calls `signOut()` on the Supabase client
+
+<Note>
+  After signing out, you won't be able to sync notes until you sign in again.
+</Note>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Sign in failed: Invalid credentials">
+    - Verify your email and password are correct
+    - Check if the user exists in your Supabase project (**Authentication > Users**)
+    - Ensure email confirmation is disabled or the user's email is confirmed
+  </Accordion>
+  
+  <Accordion title="Could not start callback server">
+    The OAuth callback server on port `38473` failed to start:
+    
+    - Check if another application is using port `38473`
+    - Use email/password authentication instead
+    - Verify the redirect URL is configured correctly in Supabase
+  </Accordion>
+  
+  <Accordion title="Auth session missing during sync">
+    - Make sure you're signed in (**Settings > SupaSync > Authentication**)
+    - Try signing out and signing in again
+    - Check if tokens have expired (the plugin should auto-refresh, but manual re-authentication may be needed)
+  </Accordion>
+</AccordionGroup>

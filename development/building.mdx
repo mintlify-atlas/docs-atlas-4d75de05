@@ -1,0 +1,119 @@
+---
+title: Building from source
+description: Build the SupaSync plugin from source code using npm and esbuild
+---
+
+SupaSync uses esbuild to bundle TypeScript source code into a single `main.js` file that Obsidian can load.
+
+## Prerequisites
+
+You need Node.js and npm installed on your system. The plugin is built with:
+
+- TypeScript 4.7.4
+- esbuild 0.17.3
+- Target: ES2018
+
+## Install dependencies
+
+Clone the repository and install all dependencies:
+
+```bash
+npm install
+```
+
+This installs:
+- `@supabase/supabase-js` (production dependency)
+- TypeScript, esbuild, Vitest, and type definitions (dev dependencies)
+- Obsidian API types (external at runtime)
+
+## Build commands
+
+<Steps>
+  <Step title="Production build">
+    Create an optimized bundle without source maps:
+
+    ```bash
+    npm run build
+    ```
+
+    This command:
+    1. Runs TypeScript type checking with `tsc -noEmit -skipLibCheck`
+    2. Executes `node esbuild.config.mjs production`
+    3. Outputs `main.js` in the root directory
+  </Step>
+
+  <Step title="Development build">
+    Run esbuild in watch mode with inline source maps:
+
+    ```bash
+    npm run dev
+    ```
+
+    This watches for file changes and rebuilds automatically. Source maps are included inline for debugging.
+  </Step>
+</Steps>
+
+## Build configuration
+
+The build is configured in `esbuild.config.mjs`:
+
+```javascript
+{
+  entryPoints: ["main.ts"],
+  bundle: true,
+  external: ["obsidian", "electron", /* CodeMirror packages */, ...builtins],
+  format: "cjs",
+  target: "es2018",
+  sourcemap: isProduction ? false : "inline",
+  treeShaking: true,
+  outfile: "main.js"
+}
+```
+
+### Key settings
+
+- **Entry point**: `main.ts` (plugin lifecycle and registration)
+- **Format**: CommonJS (`cjs`) - required by Obsidian
+- **External modules**: Obsidian API, Electron, CodeMirror, and Node.js builtins are not bundled
+- **Tree shaking**: Enabled to remove unused code
+- **Source maps**: Inline in dev mode, disabled in production
+
+## Output files
+
+After building, you'll have:
+
+- `main.js` - The bundled plugin code that Obsidian loads
+- `manifest.json` - Plugin metadata (already present, not generated)
+
+To install the plugin in Obsidian:
+
+1. Copy `main.js` and `manifest.json` to `.obsidian/plugins/supasync/` in your vault
+2. Restart Obsidian or reload the plugin
+3. Enable SupaSync in Settings → Community plugins
+
+<Note>
+  The build process externalizes the Obsidian API, meaning `obsidian` imports are not bundled. Obsidian provides these at runtime.
+</Note>
+
+## TypeScript configuration
+
+The project uses strict TypeScript settings in `tsconfig.json`:
+
+- `noImplicitAny: true` - All types must be explicit
+- `strictNullChecks: true` - Null and undefined are handled strictly
+- `target: "ES6"` - Compile to ES6 (esbuild transpiles to ES2018)
+- `moduleResolution: "node"` - Use Node.js resolution algorithm
+
+## Troubleshooting
+
+### Build fails with type errors
+
+Run type checking separately to see detailed errors:
+
+```bash
+npx tsc -noEmit
+```
+
+### Watch mode not detecting changes
+
+Ensure you're in the project root directory and that `main.ts` or files in subdirectories (`sync/`, `auth/`, etc.) have been modified.

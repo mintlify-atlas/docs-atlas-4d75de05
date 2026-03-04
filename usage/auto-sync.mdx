@@ -1,0 +1,345 @@
+---
+title: Auto-sync
+description: Configuring and using automatic sync on file changes
+---
+
+Auto-sync automatically syncs files to Supabase when you create, modify, rename, or delete them in your vault. This provides a seamless sync experience without manually running Full Sync.
+
+## Enabling auto-sync
+
+Auto-sync is disabled by default. To enable it:
+
+<Steps>
+  <Step title="Open settings">
+    Go to Settings → SupaSync in Obsidian
+  </Step>
+  
+  <Step title="Toggle auto-sync">
+    Enable the "Auto-sync" toggle
+  </Step>
+  
+  <Step title="Configure scope">
+    Ensure your sync folders are configured correctly (empty = entire vault)
+  </Step>
+</Steps>
+
+```typescript
+// From settings/settings.types.ts:1-17
+export interface SyncSettings {
+  supabaseUrl: string;
+  supabaseAnonKey: string;
+  accessToken?: string;
+  refreshToken?: string;
+  expiresAt?: number;
+  authStorage?: Record<string, string>;
+  autoSync: boolean;  // Auto-sync toggle
+  syncFolders: string[];  // Scope configuration
+}
+
+export const DEFAULT_SETTINGS: SyncSettings = {
+  supabaseUrl: "",
+  supabaseAnonKey: "",
+  autoSync: false,  // Disabled by default
+  syncFolders: [],
+};
+```
+
+<Info>
+  Auto-sync only affects files within your configured sync scope. Files outside the scope are ignored even when auto-sync is enabled.
+</Info>
+
+## How auto-sync works
+
+SupaSync registers event listeners for vault changes when the plugin loads:
+
+```typescript
+// From main.ts:306-353
+registerEventListeners() {
+  this.registerEvent(
+    this.app.vault.on("create", async (file) => { ... })
+  );
+  
+  this.registerEvent(
+    this.app.vault.on("modify", async (file) => { ... })
+  );
+  
+  this.registerEvent(
+    this.app.vault.on("delete", async (file) => { ... })
+  );
+  
+  this.registerEvent(
+    this.app.vault.on("rename", async (file, oldPath) => { ... })
+  );
+}
+```
+
+### File events
+
+Auto-sync responds to four vault events:
+
+1. **Create**: New file added to vault
+2. **Modify**: Existing file content changed
+3. **Delete**: File removed from vault
+4. **Rename**: File moved or renamed
+
+## Event handling
+
+### Create events
+
+When a new file is created:
+
+```typescript
+// From main.ts:307-316
+this.registerEvent(
+  this.app.vault.on("create", async (file) => {
+    if (!this.settings.autoSync) return;
+    if (this.syncManager?.isSyncing()) return;
+    if (Date.now() - this.loadTime < 5000) return;
+    if (file instanceof TFile && file.extension === "md") {
+      await this.syncManager?.syncFile(file);
+    }
+  })
+);
+```
+
+**Conditions checked**:
+- Auto-sync is enabled
+- No full sync is running
+- At least 5 seconds have passed since plugin load (prevents initial vault scan from triggering)
+- File is a markdown file (`.md` extension)
+
+<Note>
+  The 5-second grace period after plugin load prevents auto-sync from triggering during Obsidian's initial vault indexing.
+</Note>
+
+### Modify events
+
+When a file is modified:
+
+```typescript
+// From main.ts:318-332
+this.registerEvent(
+  this.app.vault.on("modify", async (file) => {
+    if (!this.settings.autoSync) return;
+    if (this.syncManager?.isSyncing()) return;
+    if (file instanceof TFile && file.extension === "md") {
+      if (!this.debouncedSync) {
+        this.debouncedSync = debounce(async (f: TFile) => {
+          if (this.syncManager?.isSyncing()) return;
+          await this.syncManager?.syncFile(f);
+        }, 750);
+      }
+      this.debouncedSync(file);
+    }
+  })
+);
+```
+
+**Key features**:
+- Uses a **750ms debounce** to avoid syncing on every keystroke
+- Checks if full sync is running (debounced function also checks)
+- Only processes markdown files
+
+#### Debounce implementation
+
+The debounce delays sync until you stop typing:
+
+```typescript
+// From main.ts:324-328
+this.debouncedSync = debounce(async (f: TFile) => {
+  if (this.syncManager?.isSyncing()) return;
+  await this.syncManager?.syncFile(f);
+}, 750);
+```
+
+If you type continuously, the debounce resets. Sync only occurs 750ms after your last keystroke.
+
+<Info>
+  The 750ms debounce balances responsiveness and performance. It prevents excessive API calls while keeping your notes synced promptly.
+</Info>
+
+### Delete events
+
+When a file is deleted:
+
+```typescript
+// From main.ts:334-342
+this.registerEvent(
+  this.app.vault.on("delete", async (file) => {
+    if (!this.settings.autoSync) return;
+    if (this.syncManager?.isSyncing()) return;
+    if (file.path) {
+      await this.syncManager?.handleDelete(file.path);
+    }
+  })
+);
+```
+
+**Behavior**:
+- No debounce (deletes sync immediately)
+- Checks file is in scope before syncing
+- Removes note from Supabase and clears local hash
+
+### Rename events
+
+When a file is renamed or moved:
+
+```typescript
+// From main.ts:344-352
+this.registerEvent(
+  this.app.vault.on("rename", async (file, oldPath) => {
+    if (!this.settings.autoSync) return;
+    if (this.syncManager?.isSyncing()) return;
+    if (file instanceof TFile && file.extension === "md") {
+      await this.syncManager?.handleRename(oldPath, file.path, file);
+    }
+  })
+);
+```
+
+**How rename is handled**:
+
+```typescript
+// From sync/sync.manager.ts:173-180
+async handleRename(oldPath: string, newPath: string, file: TFile): Promise<void> {
+  if (!this.api) return;
+  
+  await this.handleDelete(oldPath);  // Delete old path
+  await this.syncFile(file);         // Upload new path
+}
+```
+
+Rename is treated as:
+1. **Delete** of the old path
+2. **Create** of the new path
+
+This ensures Supabase stays consistent with your vault structure.
+
+## Sync safeguards
+
+Auto-sync includes several safeguards to prevent issues:
+
+### No concurrent syncs
+
+Every event handler checks if a sync is already running:
+
+```typescript
+if (this.syncManager?.isSyncing()) return;
+```
+
+This prevents:
+- Auto-sync from running during Full Sync
+- Multiple auto-syncs from running simultaneously
+
+### Scope enforcement
+
+Incremental sync checks if each file is in scope:
+
+```typescript
+// From sync/sync.incremental.ts:26-28
+if (!isInScope(file.path, syncFolders)) {
+  return { success: false, skipped: true, path: file.path };
+}
+```
+
+Only files matching your sync folders are processed.
+
+### Load grace period
+
+Create events are ignored for 5 seconds after plugin load:
+
+```typescript
+// From main.ts:311
+if (Date.now() - this.loadTime < 5000) return;
+```
+
+This prevents sync storms when Obsidian indexes the vault on startup.
+
+## Performance considerations
+
+### Debounce configuration
+
+Modify events use a 750ms debounce:
+
+```typescript
+// From utils/debounce.ts (referenced in main.ts:324)
+debounce(async (f: TFile) => { ... }, 750)
+```
+
+You cannot currently configure this value, but it's designed to:
+- Avoid syncing on every keystroke
+- Sync promptly after you stop typing
+- Balance API usage and responsiveness
+
+### Hash-based change detection
+
+Even with auto-sync enabled, unchanged files are not uploaded:
+
+```typescript
+// From sync/sync.incremental.ts:39-42
+if (storedHash === hash) {
+  logger.info(`File unchanged, skipping: ${file.path}`);
+  return { success: true, skipped: true, path: file.path };
+}
+```
+
+This prevents unnecessary API calls and bandwidth usage.
+
+## Disabling auto-sync
+
+To disable auto-sync:
+
+1. Go to Settings → SupaSync
+2. Toggle "Auto-sync" off
+3. Event listeners remain registered, but early-exit when auto-sync is disabled
+
+<Warning>
+  Disabling auto-sync means you must manually run Full Sync to upload changes. Your files will not sync automatically.
+</Warning>
+
+## Cleanup on unload
+
+When the plugin unloads (or is disabled):
+
+```typescript
+// From main.ts:83-99
+onunload() {
+  // Abort any running sync
+  this.syncManager?.abort();
+  
+  // Cancel debounced sync
+  this.debouncedSync?.cancel();
+  this.debouncedSync = null;
+  
+  // ... more cleanup ...
+}
+```
+
+This ensures:
+- Pending debounced syncs are cancelled
+- No orphaned event handlers remain
+- Active syncs are properly aborted
+
+## Troubleshooting
+
+### Auto-sync not working
+
+Check:
+1. **Auto-sync enabled**: Settings → SupaSync → Auto-sync toggle
+2. **Signed in**: Status bar shows "Last sync: ..." not "Sign in required"
+3. **File in scope**: File matches your sync folders configuration
+4. **No full sync running**: Auto-sync is paused during Full Sync
+
+### Files syncing too often
+
+Modify events use a 750ms debounce. If you're seeing excessive syncs:
+- Check if other plugins are modifying files
+- Verify auto-sync is only enabled when needed
+- Consider disabling auto-sync for large refactors
+
+### Delayed sync on modify
+
+The 750ms debounce is intentional. Files sync 750ms after your last keystroke, not on every change. This is optimal for:
+- Reducing API calls
+- Preventing rate limits
+- Maintaining performance

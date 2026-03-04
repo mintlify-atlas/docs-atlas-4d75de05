@@ -1,0 +1,169 @@
+---
+title: Running tests
+description: Run unit tests with Vitest and understand the test structure
+---
+
+SupaSync uses Vitest for unit testing. Tests are located in `tests/unit/` and focus on core sync logic.
+
+## Test commands
+
+<CodeGroup>
+  ```bash Run all tests
+  npm test
+  ```
+
+  ```bash Watch mode
+  npm run test:watch
+  ```
+</CodeGroup>
+
+The `npm test` command runs `vitest run` (single pass), while `npm run test:watch` runs `vitest` in watch mode and re-runs tests when files change.
+
+## Vitest configuration
+
+Tests are configured in `vitest.config.ts`:
+
+```typescript
+export default defineConfig({
+  test: {
+    globals: true,
+    environment: "node",
+    include: ["tests/**/*.test.ts"],
+  },
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./"),
+      obsidian: path.resolve(__dirname, "tests/__mocks__/obsidian-api.ts"),
+    },
+  },
+});
+```
+
+### Key settings
+
+- **Globals**: `describe`, `it`, `expect` are available without imports
+- **Environment**: Node.js (not browser or jsdom)
+- **Test pattern**: `tests/**/*.test.ts` - all `.test.ts` files in the `tests/` directory
+- **Alias for Obsidian API**: The `obsidian` module is aliased to `tests/__mocks__/obsidian-api.ts`
+
+<Info>
+  The Obsidian API mock allows tests to run in Node.js without the actual Obsidian application.
+</Info>
+
+## Test structure
+
+Tests are organized in `tests/unit/`:
+
+- `sync.manager.test.ts` - Tests for SyncManager orchestration
+- `sync.full.test.ts` - Full sync algorithm tests
+- `sync.controller.test.ts` - Sync abort controller tests
+
+Each test file imports from the source code and uses mocks for external dependencies.
+
+### Example test
+
+```typescript
+import { describe, it, expect } from "vitest";
+import { SyncManager } from "../../sync/sync.manager";
+import { createMockVault } from "../__mocks__/obsidian";
+import { createMockSupabaseAPI, createMockStateManager } from "../__mocks__/supabase";
+
+describe("SyncManager fullSync", () => {
+  it("two consecutive fullSync() calls both succeed", async () => {
+    const vault = createMockVault([{ path: "note1.md" }, { path: "note2.md" }]);
+    const api = createMockSupabaseAPI();
+    const stateManager = createMockStateManager();
+    const settings = {
+      supabaseUrl: "https://test.supabase.co",
+      supabaseAnonKey: "key",
+      autoSync: false,
+      syncFolders: [] as string[],
+    };
+
+    const manager = new SyncManager(
+      vault as any,
+      api as any,
+      stateManager as any,
+      settings
+    );
+
+    const result1 = await manager.fullSync();
+    expect(result1.success).toBe(true);
+    expect(result1.aborted).toBeFalsy();
+
+    const result2 = await manager.fullSync();
+    expect(result2.success).toBe(true);
+    expect(result2.aborted).toBeFalsy();
+  });
+});
+```
+
+## Mocking
+
+The test suite uses mocks in `tests/__mocks__/`:
+
+### Obsidian API mock
+
+`obsidian-api.ts` and `obsidian.ts` provide mock implementations of:
+
+- `Notice` - Obsidian's notification system
+- `TFile` - File objects with `path`, `basename`, `extension`
+- `Vault` - Vault methods like `getMarkdownFiles()`, `read()`, `create()`
+
+Example from `obsidian-api.ts`:
+
+```typescript
+export class Notice {
+  constructor(_message: string, _duration?: number) {}
+}
+
+export class TFile {
+  path!: string;
+  basename!: string;
+  extension!: string;
+}
+
+export class Vault {
+  getMarkdownFiles!: () => TFile[];
+  read!: (file: TFile) => Promise<string>;
+  // ...
+}
+```
+
+### Supabase mock
+
+`supabase.ts` provides:
+
+- `createMockSupabaseAPI()` - Mock implementation of `upsertNotes()`, `deleteByPath()`
+- `createMockStateManager()` - Mock state manager for file hashes
+- `createMockVault()` - Creates a mock vault with files
+
+These mocks allow tests to verify sync logic without connecting to a real Supabase database or Obsidian vault.
+
+<Note>
+  Mocks return Promises that resolve immediately, so tests run fast and don't require network access.
+</Note>
+
+## Running specific tests
+
+You can run a specific test file:
+
+```bash
+npx vitest run tests/unit/sync.manager.test.ts
+```
+
+Or filter by test name pattern:
+
+```bash
+npx vitest run -t "fullSync"
+```
+
+## Coverage
+
+To generate test coverage reports:
+
+```bash
+npx vitest run --coverage
+```
+
+This requires installing the `@vitest/coverage-v8` package.

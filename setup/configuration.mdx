@@ -1,0 +1,219 @@
+---
+title: Configuration
+description: Configure the SupaSync plugin in Obsidian settings
+---
+
+After setting up Supabase and configuring authentication, you need to configure the SupaSync plugin in Obsidian.
+
+## Accessing plugin settings
+
+To open SupaSync settings:
+
+1. Open Obsidian **Settings** (gear icon or `Cmd/Ctrl + ,`)
+2. Navigate to **Community plugins > SupaSync**
+
+## Configuration options
+
+### Supabase credentials
+
+<ParamField path="Supabase URL" type="string" required>
+  Your Supabase project URL from **Settings > API** in the Supabase dashboard.
+  
+  **Format**: `https://xxxxx.supabase.co`
+  
+  Example: `https://abcdefghijklmnop.supabase.co`
+</ParamField>
+
+<ParamField path="Supabase Anon Key" type="string" required>
+  Your Supabase anonymous/public key from **Settings > API** in the Supabase dashboard.
+  
+  **Format**: Starts with `eyJ...`
+  
+  <Warning>
+    Use the `anon` key, not the `service_role` key. The `service_role` key bypasses Row Level Security and should never be used in the plugin.
+  </Warning>
+</ParamField>
+
+#### Testing your connection
+
+After entering your credentials, click **Test** to verify the connection:
+
+- **Success**: "Connection successful!" indicates your credentials are valid
+- **Failure**: Check that your URL ends with `.supabase.co` and your anon key is correct
+- **Timeout**: Verify your network connection and Supabase project status
+
+### Authentication
+
+You must sign in before syncing notes. The notes table uses Row Level Security (RLS) and requires authentication.
+
+<Steps>
+  <Step title="Choose authentication method">
+    - **Email/Password**: Enter your email and password, then click **Sign in with Email**
+    - **Google OAuth**: Click **Sign in with Google** to authenticate in your browser
+  </Step>
+  
+  <Step title="Verify sign-in status">
+    After successful authentication, you'll see "Signed in as [your-email]" with a **Sign out** button.
+  </Step>
+</Steps>
+
+<Note>
+  See the [Authentication](/setup/authentication) guide for detailed setup instructions.
+</Note>
+
+### Sync settings
+
+<ParamField path="Auto Sync" type="boolean" default="false">
+  When enabled, SupaSync automatically syncs files when they are created, modified, or deleted.
+  
+  **Default**: Disabled
+  
+  - ✅ **Enabled**: Files sync immediately on change
+  - ❌ **Disabled**: Sync only when you manually trigger it
+</ParamField>
+
+<ParamField path="Sync Folders" type="string[]" default="[]">
+  Specify which folders to sync. Enter one folder path per line.
+  
+  **Default**: Empty (sync entire vault)
+  
+  **Examples**:
+  ```
+  Notes
+  Projects/Work
+  Daily Notes
+  ```
+  
+  <Note>
+    Leave empty to sync your entire vault. Folder paths are relative to your vault root.
+  </Note>
+</ParamField>
+
+## Configuration structure
+
+SupaSync settings are stored in `.obsidian/plugins/supasync/data.json` with the following structure:
+
+```typescript
+interface SyncSettings {
+  supabaseUrl: string;
+  supabaseAnonKey: string;
+  accessToken?: string;
+  refreshToken?: string;
+  expiresAt?: number;
+  authStorage?: Record<string, string>;
+  autoSync: boolean;
+  syncFolders: string[];
+}
+```
+
+<Warning>
+  Do not manually edit `data.json` while Obsidian is running. Use the settings tab to update configuration.
+</Warning>
+
+### Default settings
+
+When you first install SupaSync, the plugin uses these defaults:
+
+```typescript
+const DEFAULT_SETTINGS: SyncSettings = {
+  supabaseUrl: "",
+  supabaseAnonKey: "",
+  autoSync: false,
+  syncFolders: [],
+};
+```
+
+See `settings/settings.types.ts:12-17` for the implementation.
+
+## Setting up sync folders
+
+### Sync entire vault
+
+Leave **Sync Folders** empty to sync all markdown files in your vault:
+
+```typescript
+syncFolders: []
+```
+
+### Sync specific folders
+
+To sync only specific folders, enter one folder path per line:
+
+```
+Notes
+Projects/Work
+```
+
+This configuration syncs:
+- All files in the `Notes` folder
+- All files in the `Projects/Work` folder
+
+Files outside these folders are not synced.
+
+<Note>
+  Folder paths are case-sensitive and relative to your vault root. Do not include leading or trailing slashes.
+</Note>
+
+## Validating your configuration
+
+<Steps>
+  <Step title="Test Supabase connection">
+    Click **Test Connection** to verify your Supabase URL and anon key are correct.
+  </Step>
+  
+  <Step title="Sign in">
+    Use the Authentication section to sign in with email/password or Google OAuth.
+  </Step>
+  
+  <Step title="Configure sync folders (optional)">
+    Enter folder paths in **Sync Folders** or leave empty to sync your entire vault.
+  </Step>
+  
+  <Step title="Enable auto-sync (optional)">
+    Toggle **Auto Sync** if you want files to sync automatically on change.
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Connection failed: Invalid URL">
+    - Verify your Supabase URL ends with `.supabase.co`
+    - Remove any trailing slashes from the URL
+    - Check that the project exists in your Supabase dashboard
+  </Accordion>
+  
+  <Accordion title="Connection failed: Invalid API key">
+    - Verify your anon key starts with `eyJ`
+    - Copy the entire key without spaces or line breaks
+    - Get a fresh key from **Settings > API** in Supabase dashboard
+  </Accordion>
+  
+  <Accordion title="Sign in required for sync">
+    The notes table requires authentication:
+    
+    - Click **Sign in with Email** or **Sign in with Google** in the Authentication section
+    - Verify you see "Signed in as [your-email]" after authentication
+    - See the [Authentication](/setup/authentication) guide for help
+  </Accordion>
+  
+  <Accordion title="Files not syncing">
+    - Verify you're signed in
+    - Check that the file is in a configured sync folder (or sync folders is empty)
+    - Enable **Auto Sync** or manually trigger sync
+    - Check Obsidian's developer console for errors (`Ctrl/Cmd + Shift + I`)
+  </Accordion>
+</AccordionGroup>
+
+## Next steps
+
+After configuring SupaSync, you're ready to start syncing:
+
+<CardGroup cols={2}>
+  <Card title="Syncing notes" icon="sync" href="/usage/syncing">
+    Learn how to sync your notes to Supabase
+  </Card>
+  <Card title="Auto-sync" icon="rotate" href="/usage/auto-sync">
+    Configure automatic syncing on file changes
+  </Card>
+</CardGroup>

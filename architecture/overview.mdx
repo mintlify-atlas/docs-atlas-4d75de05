@@ -1,0 +1,253 @@
+---
+title: Architecture overview
+description: Project structure and module organization for SupaSync
+---
+
+SupaSync is organized into distinct modules, each with a single responsibility. This architecture enables maintainability, testability, and clear separation of concerns.
+
+## Module organization
+
+The plugin follows a layered architecture where each layer has specific responsibilities:
+
+| Module | Role |
+|--------|------|
+| `main.ts` | Plugin lifecycle, commands, ribbon, panel registration, vault events → SyncManager |
+| `settings/` | Settings tab UI, Supabase URL/key, auth UI, sync folders, auto-sync |
+| `auth/` | AuthService: Supabase client with persisted session, sign-in (password + Google OAuth) |
+| `sync/` | SyncManager, full sync, incremental (single file), delete, scope, hash, controller (abort) |
+| `supabase/` | Client creation, API (upsert notes, delete by path) |
+| `state/` | StateManager: fileHashes, lastFullSync (load/save via plugin data) |
+| `views/` | Sync panel view |
+| `utils/` | debounce, logger, progress notice |
+
+## Core layers
+
+### Plugin entry (`main.ts`)
+
+The entry point handles plugin lifecycle and delegates all business logic to specialized modules:
+
+- Loads settings and state on plugin initialization
+- Instantiates `StateManager`, `AuthService`, and `SyncManager`
+- Registers commands (Full Sync, Cancel Sync)
+- Registers ribbon button and sync panel
+- Listens to vault events (create, modify, delete, rename)
+- Contains zero business logic—all work is delegated
+
+### Settings layer (`settings/`)
+
+Manages plugin configuration through the settings tab:
+
+**`settings.types.ts`**
+- Defines `SyncSettings` interface
+- Declares default settings structure
+
+**`settings.ts`**
+- Renders settings tab UI
+- Handles Supabase URL and anon key input
+- Manages auto-sync toggle
+- Validates folder input format
+- Persists settings using plugin `saveData()`
+- No sync or network logic
+
+### Authentication layer (`auth/`)
+
+**`auth.service.ts`**
+
+Handles all authentication operations:
+
+- Creates and manages Supabase client with persisted session
+- Implements email/password sign-in
+- Implements Google OAuth flow with local callback server (port 38473)
+- Manages session storage through plugin data
+- Handles token refresh automatically
+- Provides sign-out functionality
+- Returns authenticated client for API operations
+
+<Note>
+The OAuth flow uses a temporary local HTTP server to receive the callback from Google, then exchanges tokens with Supabase to establish a session.
+</Note>
+
+### State layer (`state/`)
+
+**`state.types.ts`**
+- Defines `LocalSyncState` structure with `fileHashes` and `lastFullSync`
+
+**`state.manager.ts`**
+
+Manages local sync state without any network operations:
+
+- `loadState()`: Loads state from plugin data
+- `saveState()`: Persists state to plugin data
+- `getHash(path)`: Retrieves stored hash for a file
+- `setHash(path, hash)`: Updates hash for a file
+- `removeHash(path)`: Removes hash entry
+- `getAllPaths()`: Returns all tracked file paths
+- `detectDeletedPaths(currentVaultPaths)`: Identifies files removed from vault
+- Ensures state integrity—no mutations before remote success
+- Never performs network calls
+
+### Sync layer (`sync/`)
+
+The business logic core that orchestrates all sync operations:
+
+**`sync.manager.ts`**
+
+Orchestrates the entire sync system:
+
+- `fullSync()`: Triggers complete vault sync
+- `syncFile(file)`: Syncs a single file (used for auto-sync)
+- `handleDelete(path)`: Removes note from Supabase
+- `handleRename(oldPath, newPath)`: Treats as delete + create
+- Coordinates hashing, scope filtering, state comparison, and API calls
+- Handles batching (50 records per batch)
+- Manages error recovery
+- Writes sync log to `_system/sync-log.md`
+- Uses `SyncController` to manage abort signals
+
+**`sync.full.ts`**
+
+Implements the full sync algorithm:
+
+1. Get all markdown files from vault
+2. Filter by scope (configured folders)
+3. Compute SHA256 hash for each file
+4. Compare with stored hash from state
+5. Build NEW and MODIFIED lists
+6. Batch upsert (50 records per batch)
+7. Detect deletions by comparing state with current vault
+8. Batch delete removed files
+9. Update state with new hashes and lastFullSync timestamp
+10. Yield to UI every 8 operations to prevent freezing
+
+**`sync.incremental.ts`**
+
+Handles single-file sync during auto-sync events:
+
+- Checks if file is in scope
+- Computes current hash
+- Compares with stored hash
+- Skips unchanged files
+- Upserts modified files
+- Updates state only after successful remote update
+
+**`sync.delete.ts`**
+
+Handles deletion operations:
+
+- `deleteNote(path)`: Deletes single note and removes from state
+- `deleteBatch(paths)`: Deletes multiple notes efficiently
+- Called during file delete events and full sync cleanup
+- Only updates state after successful remote delete
+
+**`sync.hash.ts`**
+
+Provides pure hash generation:
+
+- `computeHash(content)`: Returns SHA256 hex digest of content
+- No external dependencies except Node.js crypto
+
+**`sync.scope.ts`**
+
+Determines if a file should be synced:
+
+- `isInScope(path, syncFolders)`: Returns true if file matches scope
+- If `syncFolders` is empty, all files are in scope
+- Otherwise, path must equal or start with a configured folder
+
+**`sync.controller.ts`**
+
+Manages sync cancellation:
+
+- Tracks if sync is currently running
+- Provides `AbortSignal` for cancellable operations
+- Prevents multiple concurrent syncs
+
+### Supabase layer (`supabase/`)
+
+**`supabase.client.ts`**
+- Creates and exports Supabase client
+- Injects URL and anon key from settings
+- Uses authenticated session from AuthService
+
+**`supabase.api.ts`**
+
+Wraps all database operations:
+
+- `upsertNotes(batch)`: Inserts or updates notes with conflict resolution on `(user_id, path)`
+- `deleteNote(path)`: Removes single note by path
+- `deleteBatch(paths)`: Removes multiple notes by path
+- Fetches authenticated user ID before operations
+- Includes timeouts (15s for single, 30s for batch)
+- Supports abort signals for cancellation
+- Returns detailed error information
+
+<Warning>
+All operations require an authenticated user. The API automatically includes `user_id` in upsert operations to ensure proper RLS enforcement.
+</Warning>
+
+### Views layer (`views/`)
+
+**`sync-panel.ts`**
+
+Implements the right-sidebar sync panel:
+
+- Displays list of files with sync status
+- Shows status icons (pending, in progress, completed, failed)
+- Provides sync button
+- Updates in real-time during sync operations
+
+### Utils layer (`utils/`)
+
+**`debounce.ts`**
+- Generic debounce utility for auto-sync events
+- Prevents rapid-fire sync on multiple modify events
+
+**`logger.ts`**
+- Centralized logging with info, warn, and error levels
+- Can be extended for debug mode
+
+**`progress-notice.ts`**
+- Displays sync progress notifications
+- Shows current/total counts during operations
+
+## Design principles
+
+The architecture enforces these key principles:
+
+- **Single Responsibility**: Each module has one clear purpose
+- **No business logic in UI**: Settings and views only handle presentation
+- **No network logic in state**: State management is purely local
+- **No state mutation before success**: State updates only after confirmed remote operations
+- **Idempotent operations**: Safe to re-run full sync at any time
+- **No service key storage**: Only anon key + authenticated sessions
+- **RLS-compliant**: All operations respect Row Level Security policies
+
+## Event flow
+
+### File create event
+1. `main.ts` receives vault create event
+2. Delegates to `sync.manager.syncFile()`
+3. `sync.incremental.ts` processes the file
+4. `supabase.api.ts` upserts to remote
+5. `state.manager` updates hash on success
+
+### File modify event
+1. `main.ts` receives vault modify event (debounced)
+2. `sync.incremental.ts` computes hash and compares
+3. Conditional upsert if hash differs
+4. State update on success
+
+### File delete event
+1. `main.ts` receives vault delete event
+2. `sync.delete.ts` calls remote delete
+3. Removes hash from state on success
+
+### File rename event
+Treated as two operations:
+1. Delete old path
+2. Create new path
+
+### Manual full sync
+1. Ribbon button or command triggers `sync.manager.fullSync()`
+2. Executes full algorithm in `sync.full.ts`
+3. Updates state and writes sync log

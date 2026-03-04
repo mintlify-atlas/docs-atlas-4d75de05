@@ -1,0 +1,261 @@
+---
+title: Commands
+description: All available SupaSync commands and how to use them
+---
+
+SupaSync provides three commands accessible via the command palette. You can assign hotkeys to any of these commands in Obsidian's Hotkeys settings.
+
+## Available commands
+
+### Full Sync
+
+**Command ID**: `supasync-full-sync`
+
+**Name**: "Full Sync"
+
+Triggers a full sync of all files in your configured scope.
+
+```typescript
+// From main.ts:53-59
+this.addCommand({
+  id: "supasync-full-sync",
+  name: "Full Sync",
+  callback: () => {
+    this.runFullSync();
+  },
+});
+```
+
+<Steps>
+  <Step title="Pre-checks">
+    Verifies that:
+    - No sync is already in progress
+    - You are signed in to Supabase
+    - SyncManager is initialized
+  </Step>
+  
+  <Step title="Scan">
+    Scans all markdown files in your configured scope and computes content hashes
+  </Step>
+  
+  <Step title="Detect changes">
+    Identifies new, modified, and deleted files by comparing hashes
+  </Step>
+  
+  <Step title="Upload">
+    Uploads changes to Supabase in batches of 50 files
+  </Step>
+  
+  <Step title="Complete">
+    Updates local state and shows a result summary
+  </Step>
+</Steps>
+
+#### Behavior
+
+When you run Full Sync:
+
+1. **If already syncing**: Shows "Sync already in progress" notice and exits
+2. **If not signed in**: Shows "Sign in required to sync" notice
+3. **If sync available**: Starts full sync and shows progress
+
+```typescript
+// From main.ts:243-248
+if (this.syncManager?.isSyncing()) {
+  this.syncPanelView?.setMessage("Sync already in progress");
+  new Notice("Sync already in progress", 3000);
+  return;
+}
+```
+
+#### Result notifications
+
+After sync completes, you'll see one of these notices:
+
+- **Success**: "Sync complete: N new, N modified, N deleted" (5 seconds)
+- **No files**: "No markdown files in sync folders. Check folder names." (5 seconds)
+- **Failure**: "Sync failed (N errors). Check _system/sync-log.md" (5 seconds)
+- **Cancelled**: "Sync cancelled" (3 seconds)
+
+<Info>
+  Full sync results are also displayed in the status bar and logged to `_system/sync-log.md`.
+</Info>
+
+### Cancel Sync
+
+**Command ID**: `supasync-cancel-sync`
+
+**Name**: "Cancel Sync"
+
+Aborts an in-progress sync operation.
+
+```typescript
+// From main.ts:61-67
+this.addCommand({
+  id: "supasync-cancel-sync",
+  name: "Cancel Sync",
+  callback: () => {
+    this.cancelSync();
+  },
+});
+```
+
+#### How it works
+
+```typescript
+// From main.ts:133-142
+private cancelSync(): void {
+  if (this.syncManager?.isSyncing()) {
+    this.syncManager.abort();
+    new Notice("Cancelling sync...", 2000);
+    this.setStatusBar("Cancelled");
+    this.updateStatusBar(2000);
+  } else {
+    new Notice("No sync in progress", 2000);
+  }
+}
+```
+
+When you cancel a sync:
+
+1. **Checks if syncing**: Verifies a sync is actually running
+2. **Aborts operation**: Signals the SyncController to abort
+3. **Updates UI**: Shows "Cancelling sync..." notice
+4. **Saves state**: Commits hashes for files that were already synced
+
+<Warning>
+  Cancelling a sync saves state for files processed before cancellation. Remaining files will be synced on the next run.
+</Warning>
+
+#### When no sync is running
+
+If you run Cancel Sync when no sync is active:
+
+```
+No sync in progress
+```
+
+The command is safe to run anytime—it simply checks state and exits if nothing is running.
+
+### Show Sync panel
+
+**Command ID**: `supasync-show-panel`
+
+**Name**: "Show Sync panel"
+
+Opens (or focuses) the Sync panel in the right sidebar.
+
+```typescript
+// From main.ts:45-51
+this.addCommand({
+  id: "supasync-show-panel",
+  name: "Show Sync panel",
+  callback: () => {
+    this.ensureSyncPanelExists(true);
+  },
+});
+```
+
+#### Panel management
+
+```typescript
+// From main.ts:118-131
+private ensureSyncPanelExists(active: boolean): void {
+  const leaves = this.app.workspace.getLeavesOfType(SYNC_PANEL_VIEW_TYPE);
+  let leaf = leaves[0];
+  if (!leaf) {
+    const rightLeaf = this.app.workspace.getRightLeaf(false);
+    if (!rightLeaf) return;
+    leaf = rightLeaf;
+    this.app.workspace.revealLeaf(leaf);
+    leaf.setViewState({ type: SYNC_PANEL_VIEW_TYPE });
+  }
+  if (active) {
+    this.app.workspace.setActiveLeaf(leaf);
+  }
+}
+```
+
+The command:
+
+1. **Checks for existing panel**: Looks for a leaf with the sync panel view
+2. **Creates if missing**: Opens a new panel in the right sidebar
+3. **Reveals and focuses**: Makes the panel visible and active
+
+<Note>
+  The Sync panel can also be opened via the ribbon icon (layout sidebar right).
+</Note>
+
+## Command palette shortcuts
+
+To quickly access commands:
+
+1. Press `Cmd/Ctrl + P` to open command palette
+2. Type "SupaSync" to filter commands
+3. Select the desired command
+
+You'll see:
+- SupaSync: Full Sync
+- SupaSync: Cancel Sync
+- SupaSync: Show Sync panel
+
+## Assigning hotkeys
+
+You can assign keyboard shortcuts to any command:
+
+<Steps>
+  <Step title="Open Hotkeys settings">
+    Go to Settings → Hotkeys in Obsidian
+  </Step>
+  
+  <Step title="Search for SupaSync">
+    Type "SupaSync" in the search box to filter the commands
+  </Step>
+  
+  <Step title="Assign hotkey">
+    Click the "+" icon next to a command and press your desired key combination
+  </Step>
+</Steps>
+
+Recommended hotkeys:
+- **Full Sync**: `Cmd/Ctrl + Shift + S`
+- **Show Sync panel**: `Cmd/Ctrl + Shift + P`
+- **Cancel Sync**: No default (only needed during active syncs)
+
+## Plugin lifecycle integration
+
+### On load
+
+Commands are registered during plugin initialization:
+
+```typescript
+// From main.ts:26-81
+async onload() {
+  // ... initialization ...
+  
+  // Register commands
+  this.addCommand({ id: "supasync-show-panel", ... });
+  this.addCommand({ id: "supasync-full-sync", ... });
+  this.addCommand({ id: "supasync-cancel-sync", ... });
+}
+```
+
+### On unload
+
+When the plugin unloads, any running sync is automatically aborted:
+
+```typescript
+// From main.ts:83-99
+onunload() {
+  // Abort any running sync
+  try {
+    this.syncManager?.abort();
+  } catch (e) {
+    logger.error("Error aborting sync:", e);
+  }
+  
+  // ... cleanup ...
+}
+```
+
+This ensures syncs are properly cancelled when you disable the plugin or reload Obsidian.

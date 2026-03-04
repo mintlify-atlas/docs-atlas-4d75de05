@@ -1,0 +1,215 @@
+---
+title: Contributing guidelines
+description: Guidelines for contributing to SupaSync - code structure, workflow, and best practices
+---
+
+SupaSync follows a modular architecture with clear separation of concerns. Before contributing, familiarize yourself with the project structure and design principles.
+
+## Code structure
+
+The codebase is organized into functional layers:
+
+| Directory | Responsibility |
+|-----------|----------------|
+| `main.ts` | Plugin lifecycle, commands, ribbon, panel registration, vault events |
+| `settings/` | Settings tab UI, Supabase URL/key, auth UI, sync folders, auto-sync |
+| `auth/` | AuthService: Supabase client with persisted session, sign-in (password + Google OAuth) |
+| `sync/` | SyncManager, full sync, incremental (single file), delete, scope, hash, controller (abort) |
+| `supabase/` | Client creation, API (upsert notes, delete by path) |
+| `state/` | StateManager: fileHashes, lastFullSync (load/save via plugin data) |
+| `views/` | Sync panel view |
+| `utils/` | Debounce, logger, progress notice |
+
+### Sync layer modules
+
+The `sync/` directory contains the core business logic:
+
+- `sync.manager.ts` - Orchestrates full sync, incremental sync, delete, and rename operations
+- `sync.full.ts` - Full sync algorithm: scan vault, compute hashes, detect changes, batch upsert
+- `sync.incremental.ts` - Single-file sync for auto-sync events
+- `sync.delete.ts` - Delete detection and remote deletion
+- `sync.hash.ts` - SHA256 hash computation for content change detection
+- `sync.scope.ts` - Determines if a file is within configured sync folders
+- `sync.controller.ts` - Abort controller for canceling in-progress syncs
+
+## Design principles
+
+<Steps>
+  <Step title="Single Responsibility">
+    Each module has one clear purpose. For example:
+    - `sync.hash.ts` only computes hashes
+    - `sync.scope.ts` only checks folder scope
+    - `state.manager.ts` only manages local state
+  </Step>
+
+  <Step title="No business logic in UI">
+    The settings tab (`settings/`) and views (`views/`) contain only UI code. All sync logic lives in `sync/`.
+  </Step>
+
+  <Step title="No network calls in state layer">
+    `state.manager.ts` never makes network requests. It only loads and saves plugin data.
+  </Step>
+
+  <Step title="State mutation after remote success">
+    File hashes are updated in local state only after Supabase confirms the operation succeeded. This prevents corruption on failed syncs.
+  </Step>
+
+  <Step title="Idempotent operations">
+    Full sync can be run repeatedly without side effects. Upserts use `ON CONFLICT (user_id, path)` to ensure deterministic results.
+  </Step>
+</Steps>
+
+## Development workflow
+
+<Steps>
+  <Step title="Fork and clone">
+    Fork the repository and clone your fork:
+
+    ```bash
+    git clone https://github.com/YOUR_USERNAME/supasync.git
+    cd supasync
+    ```
+  </Step>
+
+  <Step title="Install dependencies">
+    ```bash
+    npm install
+    ```
+  </Step>
+
+  <Step title="Create a feature branch">
+    ```bash
+    git checkout -b feature/your-feature-name
+    ```
+  </Step>
+
+  <Step title="Run dev build">
+    Start the watch build to see changes immediately:
+
+    ```bash
+    npm run dev
+    ```
+
+    Link the plugin to your Obsidian vault by symlinking or copying `main.js` and `manifest.json` to `.obsidian/plugins/supasync/`.
+  </Step>
+
+  <Step title="Write tests">
+    Add tests in `tests/unit/` for new functionality. Run tests with:
+
+    ```bash
+    npm test
+    ```
+  </Step>
+
+  <Step title="Commit and push">
+    Commit your changes with a clear message:
+
+    ```bash
+    git add .
+    git commit -m "Add feature: description of change"
+    git push origin feature/your-feature-name
+    ```
+  </Step>
+
+  <Step title="Open a pull request">
+    Open a PR against the `main` branch with a description of your changes.
+  </Step>
+</Steps>
+
+## Code style
+
+- **TypeScript strict mode**: All code must pass `tsc -noEmit` with strict null checks
+- **No `any` types**: Use proper types or `unknown` with type guards
+- **Async/await**: Prefer async/await over raw Promises
+- **Error handling**: Catch and log errors; don't let exceptions propagate to Obsidian
+
+### Example: Adding a new sync module
+
+If you're adding a new sync feature, follow this pattern:
+
+1. Create a new file in `sync/` (e.g., `sync.batch.ts`)
+2. Export pure functions or a class with no side effects in the constructor
+3. Import and use in `sync.manager.ts`
+4. Add tests in `tests/unit/`
+
+```typescript
+// sync/sync.batch.ts
+export async function batchUpsert(
+  items: Array<{ path: string; content: string }>,
+  batchSize: number
+): Promise<void> {
+  // Implementation
+}
+```
+
+## Testing guidelines
+
+- Write unit tests for all new sync logic
+- Use mocks from `tests/__mocks__/` for Obsidian API and Supabase
+- Test edge cases: empty vault, large files, network failures, aborted syncs
+- Verify that state is not corrupted on failures
+
+Example test structure:
+
+```typescript
+import { describe, it, expect } from "vitest";
+import { yourFunction } from "../../sync/your-module";
+
+describe("yourFunction", () => {
+  it("handles normal case", () => {
+    const result = yourFunction(input);
+    expect(result).toBe(expected);
+  });
+
+  it("handles edge case", () => {
+    const result = yourFunction(edgeInput);
+    expect(result).toBe(edgeExpected);
+  });
+});
+```
+
+## Pull request checklist
+
+Before submitting a PR:
+
+- [ ] Code passes `npm run build` without errors
+- [ ] All tests pass with `npm test`
+- [ ] New functionality has test coverage
+- [ ] TypeScript strict mode passes (`npx tsc -noEmit`)
+- [ ] No console.log statements (use `utils/logger.ts` instead)
+- [ ] PR description explains the change and why it's needed
+
+<Note>
+  Changes to the Supabase schema or RLS policies should be documented in `specs/supabase-rls.md`.
+</Note>
+
+## Best practices
+
+### Hash-based change detection
+
+SupaSync uses SHA256 hashes to detect file changes. When working with sync logic:
+
+- Always compute the hash from file content, not metadata
+- Store hashes in `state.manager` after successful remote operations
+- Compare hashes before uploading to avoid redundant uploads
+
+### Scope filtering
+
+Files are synced based on `syncFolders` settings:
+
+- Empty `syncFolders` array = sync entire vault
+- Non-empty = sync only files in specified folders
+- Use `sync.scope.ts` to check if a file is in scope
+
+### Error handling
+
+Sync operations can fail for many reasons (network, auth, RLS). Always:
+
+- Catch errors and log them with `utils/logger.ts`
+- Show user-friendly messages with Obsidian's `Notice`
+- Don't update local state if the remote operation failed
+- Track failed paths separately from successful ones
+
+## Questions?
+
+For questions or discussions, open an issue on GitHub before starting major work. This ensures your contribution aligns with the project's direction.
