@@ -1,0 +1,71 @@
+{
+  "projectType": "general",
+  "projectName": "SupaSync",
+  "projectDescription": "One-way sync from Obsidian vault to Supabase with authentication and incremental updates",
+  "theme": "palm",
+  "primaryColor": "#39be82",
+  "lightColor": "#327c5c",
+  "darkColor": "#1b1c1c",
+  "navigation": {
+    "groups": [
+      {
+        "group": "Get Started",
+        "pages": [
+          "introduction",
+          "installation",
+          "quickstart"
+        ]
+      },
+      {
+        "group": "Setup",
+        "pages": [
+          "setup/supabase",
+          "setup/authentication",
+          "setup/configuration"
+        ]
+      },
+      {
+        "group": "Usage",
+        "pages": [
+          "usage/syncing",
+          "usage/sync-panel",
+          "usage/commands",
+          "usage/auto-sync"
+        ]
+      },
+      {
+        "group": "Architecture",
+        "pages": [
+          "architecture/overview",
+          "architecture/sync-behavior",
+          "architecture/security"
+        ]
+      },
+      {
+        "group": "Development",
+        "pages": [
+          "development/building",
+          "development/testing",
+          "development/contributing"
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "One-way vault to Supabase sync",
+    "Hash-based incremental sync",
+    "Delete detection and cleanup",
+    "Email and Google OAuth authentication",
+    "Folder-scoped sync with auto-sync",
+    "Sync panel UI with status tracking"
+  ],
+  "publicApiSurface": [
+    "SyncManager.fullSync()",
+    "SyncManager.syncFile(file)",
+    "SyncManager.abort()",
+    "AuthService.signIn(email, password)",
+    "AuthService.signInWithGoogle()",
+    "SupabaseAPI.upsertNotes(notes)",
+    "SupabaseAPI.deleteNoteByPath(path)"
+  ]
+}
